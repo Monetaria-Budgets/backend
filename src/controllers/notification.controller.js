@@ -1,7 +1,8 @@
-const db = require('../models/db'); // подключение к БД
+const db = require('../db/db'); // подключение к БД
 
 // Получить все уведомления
-const getAllNotifications = (req, res) => {
+const getAllNotifications = async (req, res) => {
+
     const query = 'SELECT id, user_id, message, created_at FROM Notification';
     db.query(query, (err, results) => {
         if (err) {
@@ -10,6 +11,24 @@ const getAllNotifications = (req, res) => {
         }
         res.json(results);
     });
+
+    try {
+
+        const [rows] = await db.execute('SELECT id, user_id, message, created_at FROM notification');
+
+        const notifications = rows.map(notification => ({
+            id: notification.id,
+            user: notification.user_id,
+            message: notification.message,
+            created_at: notification.created_at
+        }));
+
+        return res.status(200).json(notifications);
+
+    }   catch (err) {
+        console.error('Get all notifications error:', err);
+        return res.status(500).json({ error: 'Internal server error' })
+    }
 };
 
 // Получить уведомление по ID

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const auth = require('../middleware/auth');
-const db = require('../models/db');
+const db = require('../db/db');
 
 router.get('/profile', auth, (req, res) => {
     const userId = req.user.userId;

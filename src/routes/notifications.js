@@ -5,7 +5,7 @@ const {
     getNotificationById,
     getNotificationsByUserId,
     markNotificationAsRead
-} = require('../controllers/notificationController');
+} = require('../controllers/notification.controller');
 
 // GET /notifications → получить все уведомления
 router.get('/', getAllNotifications);

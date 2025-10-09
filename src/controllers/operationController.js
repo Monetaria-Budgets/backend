@@ -1,4 +1,4 @@
-const db = require('../models/db'); // подключение к БД
+const db = require('../db/db'); // подключение к БД
 
 // Получить все операции
 const getAllOperations = (req, res) => {

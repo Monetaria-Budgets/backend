@@ -1,17 +1,14 @@
 const express = require('express');
 const dotenv = require('dotenv');
-const db = require('.//models/db'); // подключение к БД
+const db = require('./db/db');
 dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-// Подключаем маршруты
+
+// Контроллеры для маршрутов
 const userRoutes = require('./routes/users');
-app.use('/users', userRoutes); // все маршруты из users.js будут доступны с префиксом /users
-
-
-// Подключаем маршруты для категорий, операций и уведомлений 
 const categoryRoutes = require('./routes/categories');
 const operationRoutes = require('./routes/operations');
 const notificationRoutes = require('./routes/notifications');
@@ -21,29 +18,25 @@ const homeRoutes = require('./routes/homeRoutes');
 const statisticsRoutes = require('./routes/statisticsRoutes');
 
 
-
+// Маршруты
+app.use('/users', userRoutes); 
 app.use('/categories', categoryRoutes);
 app.use('/operations', operationRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/auth', authRoutes);     
 app.use('/api', profileRoutes);   
-app.use('/home', homeRoutes); // Добавьте этот маршрут
-app.use('/statistics', statisticsRoutes); // Добавьте этот маршрут
+app.use('/home', homeRoutes);
+app.use('/statistics', statisticsRoutes);
 
 
-// Главная страница
-app.get('/', (req, res) => {
-    res.send('🚀 FinApp API работает!');
-});
-
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT   ;
 app.listen(PORT, () => {
-    console.log(`🌍 Сервер запущен на http://localhost:${PORT}`);
+    console.log(`🌍 Сервер запущен на порту: ${PORT}`);
 });
 
 
 
-// Функция для удаления истёкших подписок
+// Удаление истёкших подписок
 const updateExpiredPremiums = () => {
     const query = `
         UPDATE User 
@@ -69,10 +62,7 @@ const updateExpiredPremiums = () => {
 };
 
 
-// Запускать каждый час
 // setInterval(cleanupExpiredPremiums, 60 * 60 * 1000); // 1 час = 3600000 мс
-
 setInterval(updateExpiredPremiums, 2 * 60 * 1000); // каждые 2 минуты
 
-// Запустить сразу при старте сервера
 updateExpiredPremiums();

@@ -1,4 +1,4 @@
-const db = require('../models/db');
+const db = require('../db/db');
 
 // Получить данные для главного экрана (Home)
 const getHomeData = (req, res) => {

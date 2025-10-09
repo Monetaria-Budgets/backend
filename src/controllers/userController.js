@@ -1,4 +1,4 @@
-const db = require('../models/db'); // подключение к БД
+const db = require('../db/db'); // подключение к БД
 
 // Получить всех пользователей
 const getAllUsers = (req, res) => {

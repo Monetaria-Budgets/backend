@@ -1,4 +1,4 @@
-const db = require('../models/db');
+const db = require('../db/db');
 
 // Получить статистику по выбранному периоду
 const getStatisticsByPeriod = (req, res) => {
