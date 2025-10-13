@@ -3,8 +3,8 @@ const router = express.Router();
 const { 
     getAllOperations, 
     getOperationById,
-    getOperationsByUserId // <-- импортируем новый метод
-} = require('../controllers/operationController');
+    getOperationsByUserId
+} = require('../controllers/operation.controller');
 
 // GET /operations → получить все операции
 router.get('/', getAllOperations);

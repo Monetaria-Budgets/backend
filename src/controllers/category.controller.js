@@ -3,7 +3,7 @@ const db = require('../db/db'); // подключение к БД
 // Получить все категории
 const getAllCategories = async (req, res) => {
     try {
-        const [rows] = db.execute(`SELECT id, name FROM category`);
+        const [rows] = await db.execute(`SELECT id, name FROM category`);
 
         const categories = rows.map(category => ({
             id: category.id,
@@ -25,7 +25,7 @@ const getCategoryById = async (req, res) => {
         const categoryId = req.params.id;
 
         const [rows] = await db.execute(
-            `SELECT id, name, FROM Category WHERE id = ?`,
+            `SELECT id, name FROM Category WHERE id = ?`,
             [categoryId]
         );
 
@@ -33,12 +33,12 @@ const getCategoryById = async (req, res) => {
             return res.status(403).json({ error: 'Категория не найдена!' });
         }
 
-        const category = rows[0]
+        const category = rows[0];
 
         return res.status(200).json({
             id: category.id,
             name: category.name
-        })
+        });
 
     }   catch (err) {
         console.error('Get category error:', err);

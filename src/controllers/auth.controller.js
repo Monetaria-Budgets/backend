@@ -1,12 +1,16 @@
 const jwt = require('jsonwebtoken');
 const db = require('../db/db');
+const bcrypt = require('bcrypt');
 const { validateRegister, validateLogin } = require('../validation/auth.validation');
 
 const SALT_ROUNDS = 10;
+const tokenBlacklist = new Set();
 
 // Регистрация
 const register = async (req, res) => {
     try {
+        console.log(">>> REGISTER BODY:", req.body);
+
         // Валидация
         const { error, value } = validateRegister(req.body);
         if (error) {
@@ -23,7 +27,7 @@ const register = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
         // Проверка уникальности почты и логина
-        const [existingRowsForLogin] = db.execute(
+        const [existingRowsForLogin] = await db.execute(
             'SELECT id FROM user WHERE login = ?',
             [login]
         );
@@ -40,10 +44,10 @@ const register = async (req, res) => {
             return res.status(409).json({ error: 'Логин уже используется!' });
         }
 
-        // Внесение аданных в таблицу
+        // Внесение данных в таблицу
         const [result] = await db.execute(
-            `INSERT INTO User ( login, password, email) VALUES (?, ?, ?)`,
-            [login, hashedPassword, email]
+            `INSERT INTO User ( login, name, password, email) VALUES (?, ?, ?, ?)`,
+            [login, login, hashedPassword, email]
         );
 
         // Вывод результата
@@ -65,21 +69,20 @@ const register = async (req, res) => {
 // Авторизация
 const login = async (req, res) => {
     try {
-        // Валидация
+        console.log(">>> LOGIN BODY:", req.body);
+
         const { error, value } = validateLogin(req.body);
         if (error) {
-        return res.status(400).json({
-            error: 'Validation failed',
-            details: error.details.map(d => d.message),
-        });
+            return res.status(400).json({
+                error: 'Validation failed',
+                details: error.details.map(d => d.message),
+            });
         }
 
-        // Добавление данных
         const { login, password } = req.body;
 
-        // Поиск пользователя по логину
-        const [rows] = await pool.execute(
-            'SELECT * FROM person WHERE login = ?',
+        const [rows] = await db.execute(
+            'SELECT * FROM user WHERE login = ?', 
             [login]
         );
 
@@ -89,23 +92,27 @@ const login = async (req, res) => {
 
         const user = rows[0];
 
-        // Сравнение паролей
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
             return res.status(401).json({ error: 'Неверный логин или пароль!' });
         }
 
-        // Генерация JWT
         const token = jwt.sign(
             { userId: user.id, login: user.login },
             process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
 
-        const role = user.role_id === 2 ? 'Админ' : 'Пользователь';
-        const premiumStatus = user.role_id === 1 ? 'Премиум' : 'Не премиум';
+        const [userData] = await db.execute(
+            `SELECT u.is_premium, r.name as role_name 
+             FROM user u 
+             LEFT JOIN Role r ON u.role_id = r.id 
+             WHERE u.id = ?`,
+            [user.id]
+        );
 
-        // Проверка данных и авторизация
+        const userInfo = userData[0];
+
         return res.status(200).json({
             message: 'Успешная авторизация',
             token,
@@ -113,17 +120,38 @@ const login = async (req, res) => {
                 id: user.id,
                 login: user.login,
                 email: user.email,
-                role,
-                premium
+                role: userInfo.role_name,
+                premium: userInfo.is_premium
             }
-        })
+        });
         
-    }   catch (err) {
+    } catch (err) {
         console.error('Authorization error:', err);
         return res.status(500).json({ error: 'Internal server error' });
     }
-    
-    
 };
 
-module.exports = { register, login };
+const logout = async (req, res) => {
+    try {
+        const token = req.headers.authorization?.split(' ')[1];
+        
+        if (!token) {
+            return res.status(400).json({ error: 'Токен не предоставлен' });
+        }
+
+        await db.execute(
+            'INSERT INTO blacklisted_tokens (token, expires_at) VALUES (?, DATE_ADD(NOW(), INTERVAL 7 DAY))',
+            [token]
+        );
+
+        return res.status(200).json({ 
+            message: 'Успешный выход из системы' 
+        });
+        
+    } catch (err) {
+        console.error('Logout error:', err);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
+module.exports = { register, login, logout };

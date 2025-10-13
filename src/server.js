@@ -8,14 +8,13 @@ app.use(express.json());
 
 
 // Контроллеры для маршрутов
-const userRoutes = require('./routes/users');
-const categoryRoutes = require('./routes/categories');
-const operationRoutes = require('./routes/operations');
-const notificationRoutes = require('./routes/notifications');
-const authRoutes = require('./routes/auth');
-const profileRoutes = require('./routes/profile');
-const homeRoutes = require('./routes/homeRoutes');
-const statisticsRoutes = require('./routes/statisticsRoutes');
+const userRoutes = require('./routes/users.routes');
+const categoryRoutes = require('./routes/categories.routes');
+const operationRoutes = require('./routes/operations.routes');
+const notificationRoutes = require('./routes/notifications.routes');
+const authRoutes = require('./routes/auth.routes');
+const homeRoutes = require('./routes/home.routes');
+const statisticsRoutes = require('./routes/statistics.routes');
 
 
 // Маршруты
@@ -24,7 +23,6 @@ app.use('/categories', categoryRoutes);
 app.use('/operations', operationRoutes);
 app.use('/notifications', notificationRoutes);
 app.use('/auth', authRoutes);     
-app.use('/api', profileRoutes);   
 app.use('/home', homeRoutes);
 app.use('/statistics', statisticsRoutes);
 
@@ -37,7 +35,7 @@ app.listen(PORT, () => {
 
 
 // Удаление истёкших подписок
-const updateExpiredPremiums = () => {
+const updateExpiredPremiums = async () => {
     const query = `
         UPDATE User 
         SET is_premium = FALSE 
@@ -49,16 +47,16 @@ const updateExpiredPremiums = () => {
         AND is_premium = TRUE;
     `;
 
-    db.query(query, (err, result) => {
-        if (err) {
-            console.error('❌ Ошибка при обновлении истёкших подписок:', err.message);
-        } else if (result.affectedRows > 0) {
+    try {
+        const [result] = await db.query(query); // ✅ await + деструктуризация
+        if (result.affectedRows > 0) {
             console.log(`✅ ${result.affectedRows} пользователей потеряли премиум.`);
+        } else {
+            console.log('пусто');
         }
-        else {
-            console.log('пусто')
-        }
-    });
+    } catch (err) {
+        console.error('❌ Ошибка при обновлении истёкших подписок:', err.message);
+    }
 };
 
 
