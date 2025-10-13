@@ -3,16 +3,23 @@ const router = express.Router();
 const { 
     getAllOperations, 
     getOperationById,
-    getOperationsByUserId
+    getOperationsByUserId,
+    createOperation
 } = require('../controllers/operation.controller');
+const auth = require('../middleware/auth');
 
-// GET /operations → получить все операции
+// 🆕 ВАЖНО: Сначала специфичные роуты, потом общие с параметрами
+
+// GET /operations/user → получить операции текущего пользователя с фильтрами
+router.get('/user', auth, getOperationsByUserId);
+
+// GET /operations → получить все операции (админ)
 router.get('/', getAllOperations);
 
-// GET /operations/:id → получить операцию по ID
+// GET /operations/:id → получить операцию по ID (должен быть последним!)
 router.get('/:id', getOperationById);
 
-// 🆕 GET /operations/user/:userId → получить все операции пользователя по его ID
-router.get('/user/:userId', getOperationsByUserId);
+// POST /operations → создать новую операцию
+router.post('/', auth, createOperation);
 
 module.exports = router;

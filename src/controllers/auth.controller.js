@@ -54,7 +54,7 @@ const register = async (req, res) => {
         return res.status(201).json({
             id: result.insertId,
             email,
-            login
+            login,
         });
 
     }   catch (err) {
@@ -119,6 +119,7 @@ const login = async (req, res) => {
             user: {
                 id: user.id,
                 login: user.login,
+                name: user.name,
                 email: user.email,
                 role: userInfo.role_name,
                 premium: userInfo.is_premium

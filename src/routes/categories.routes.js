@@ -1,11 +1,24 @@
 const express = require('express');
+const {
+  getAllCategories,
+  getUserCategories,
+  addUserCategory,
+  deleteUserCategory
+} = require('../controllers/category.controller');
+const auth = require('../middleware/auth');
+
 const router = express.Router();
-const { getAllCategories, getCategoryById } = require('../controllers/category.controller');
 
-// GET /categories → получить все категории
-router.get('/', getAllCategories);
+// все категории (дефолтные + пользовательские)
+router.get('/', auth, getAllCategories);
 
-// GET /categories/:id → получить категорию по ID
-router.get('/:id', getCategoryById);
+// только пользовательские категории
+router.get('/user', auth, getUserCategories);
+
+// добавить свою категорию
+router.post('/user', auth, addUserCategory);
+
+// удалить категорию
+router.delete('/user/:id', auth, deleteUserCategory);
 
 module.exports = router;
