@@ -1,4 +1,5 @@
-const db = require('../db/db'); // подключение к БД
+// controllers/operation.controller.js
+const db = require('../db/db');
 
 // Получить все операции
 const getAllOperations = async (req, res) => {
@@ -92,7 +93,7 @@ const getOperationById = async (req, res) => {
 // Получить операции пользователя с фильтрами
 const getOperationsByUserId = async (req, res) => {
     try {
-        const userId = req.user.userId; // Берем из токена, а не из параметров
+        const userId = req.user.userId;
         const { startDate, endDate, category, type } = req.query;
 
         console.log('🟡 Fetching operations for user:', userId);
@@ -166,11 +167,17 @@ const getOperationsByUserId = async (req, res) => {
     }
 };
 
+// 🔥 ИСПРАВЛЕННАЯ функция создания операции
 const createOperation = async (req, res) => {
     try {
-        const { amount, category, description, operation_type_id, created_at, timezone } = req.body;
+        const { amount, category, description, operation_type_id, created_at } = req.body;
         const user_id = req.user.userId;
 
+        console.log('📥 Received operation data:', {
+            amount, category, description, operation_type_id, created_at
+        });
+
+        // Валидация
         if (!amount || !category || !operation_type_id) {
             return res.status(400).json({ error: 'Все обязательные поля должны быть заполнены' });
         }
@@ -197,35 +204,23 @@ const createOperation = async (req, res) => {
             category_id = categoryRows[0].id;
         }
 
-        // 🔥 ФИКС: Правильно обрабатываем дату с учетом часового пояса
-        let operationDate;
+        // 🔥 ПРОСТО используем дату как есть от пользователя
+        let operationDate = created_at;
         
-        if (created_at) {
-            // Дата пришла от клиента в UTC, нужно сохранить как есть
-            const clientDate = new Date(created_at);
-            
-            if (isNaN(clientDate.getTime())) {
-                return res.status(400).json({ error: 'Неверный формат даты' });
-            }
-            
-            // 🔥 Сохраняем UTC дату как есть, фронтенд сам будет конвертировать в свой часовой пояс
-            operationDate = clientDate.toISOString()
-                .replace('T', ' ')
-                .replace(/\.\d{3}Z$/, '');
-                
-            console.log('📅 Date from client:', {
-                original: created_at,
-                clientDate: clientDate.toString(),
-                savedToDB: operationDate,
-                userTimezone: timezone || 'not provided'
-            });
-        } else {
-            // Если дата не указана, используем текущее время UTC
+        if (!operationDate) {
+            // Если дата не указана, используем текущее время
             const now = new Date();
-            operationDate = now.toISOString()
-                .replace('T', ' ')
-                .replace(/\.\d{3}Z$/, '');
+            // Форматируем так же как на фронтенде
+            const year = now.getFullYear();
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            operationDate = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
         }
+
+        console.log('📅 Saving operation date as is:', operationDate);
 
         // Создаем операцию
         const [result] = await db.execute(
@@ -240,6 +235,8 @@ const createOperation = async (req, res) => {
                 operationDate
             ]
         );
+
+        console.log('✅ Operation created with id:', result.insertId);
 
         // Получаем созданную операцию
         const [newOperationRows] = await db.execute(
@@ -274,13 +271,10 @@ const createOperation = async (req, res) => {
         });
 
     } catch (err) {
-        console.error('Create operation error:', err);
+        console.error('🔴 Create operation error:', err);
+        console.error('🔴 Error details:', err.message);
         
-        if (err.code === 'ER_DUP_ENTRY') {
-            return res.status(400).json({ error: 'Категория с таким названием уже существует' });
-        }
-        
-        return res.status(500).json({ error: 'Internal server error' });
+        return res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 };
 
@@ -290,4 +284,3 @@ module.exports = {
     getOperationsByUserId,
     createOperation 
 };
-
