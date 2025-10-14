@@ -130,39 +130,27 @@ class CurrencyController {
           }
 
           const currencyId = currency[0].id;
-          const currentRate = parseFloat(data.Value) / parseFloat(data.Nominal || 1);
-
-          const [previousRates] = await db.execute(
-            `SELECT rate FROM exchange_rate 
-             WHERE currency_id = ? AND date < ? 
-             ORDER BY date DESC LIMIT 1`,
-            [currencyId, currentDate]
-          );
-
-          let previousRateValue = currentRate;
-          let changeAmount = 0;
-          let changePercentage = 0;
-
-          if (previousRates.length > 0) {
-            previousRateValue = parseFloat(previousRates[0].rate);
-            changeAmount = currentRate - previousRateValue;
-            changePercentage = previousRateValue !== 0 ? (changeAmount / previousRateValue) * 100 : 0;
-          }
+          
+          // Берем данные напрямую из ответа ЦБ
+          const currentRate = parseFloat(data.Value);
+          const previousRate = parseFloat(data.Previous);
+          const changeAmount = currentRate - previousRate;
+          const changePercentage = previousRate !== 0 ? (changeAmount / previousRate) * 100 : 0;
 
           await db.execute(
             `INSERT INTO exchange_rate 
-             (currency_id, rate, previous_rate, change_amount, change_percentage, date) 
-             VALUES (?, ?, ?, ?, ?, ?) 
-             ON DUPLICATE KEY UPDATE 
-             rate = VALUES(rate), 
-             previous_rate = VALUES(previous_rate), 
-             change_amount = VALUES(change_amount), 
-             change_percentage = VALUES(change_percentage),
-             updated_at = CURRENT_TIMESTAMP`,
+            (currency_id, rate, previous_rate, change_amount, change_percentage, date) 
+            VALUES (?, ?, ?, ?, ?, ?) 
+            ON DUPLICATE KEY UPDATE 
+            rate = VALUES(rate), 
+            previous_rate = VALUES(previous_rate), 
+            change_amount = VALUES(change_amount), 
+            change_percentage = VALUES(change_percentage),
+            updated_at = CURRENT_TIMESTAMP`,
             [
               currencyId,
               currentRate,
-              previousRateValue,
+              previousRate,
               changeAmount,
               changePercentage,
               currentDate
@@ -247,6 +235,7 @@ class CurrencyController {
           c.is_popular,
           c.sort_order,
           er.rate,
+          er.previous_rate,
           er.change_amount,
           er.change_percentage,
           er.date,
@@ -285,9 +274,10 @@ class CurrencyController {
         name: rate.name,
         symbol: rate.symbol,
         nominal: rate.nominal,
-        rate: rate.rate ? parseFloat(rate.rate).toFixed(2) : null,
-        change: rate.change_amount ? parseFloat(rate.change_amount).toFixed(2) : 0,
-        changePercentage: rate.change_percentage ? parseFloat(rate.change_percentage).toFixed(2) : 0,
+        rate: rate.rate ? parseFloat(rate.rate).toFixed(4) : null,
+        previousRate: rate.previous_rate ? parseFloat(rate.previous_rate).toFixed(4) : null,
+        change: rate.change_amount ? parseFloat(rate.change_amount).toFixed(4) : 0,
+        changePercentage: rate.change_percentage ? parseFloat(rate.change_percentage).toFixed(3) : 0,
         isPopular: Boolean(rate.is_popular),
         lastUpdated: rate.updated_at
       }));
