@@ -168,10 +168,9 @@ const getOperationsByUserId = async (req, res) => {
 
 const createOperation = async (req, res) => {
     try {
-        const { amount, category, description, operation_type_id, created_at } = req.body;
-        const user_id = req.user.userId; // Из JWT токена
+        const { amount, category, description, operation_type_id, created_at, timezone } = req.body;
+        const user_id = req.user.userId;
 
-        // Валидация
         if (!amount || !category || !operation_type_id) {
             return res.status(400).json({ error: 'Все обязательные поля должны быть заполнены' });
         }
@@ -180,7 +179,7 @@ const createOperation = async (req, res) => {
             return res.status(400).json({ error: 'Сумма должна быть положительным числом' });
         }
 
-        // Находим category_id по названию категории для данного пользователя
+        // Находим или создаем категорию
         const [categoryRows] = await db.execute(
             `SELECT id FROM Category WHERE user_id = ? AND name = ?`,
             [user_id, category]
@@ -189,18 +188,43 @@ const createOperation = async (req, res) => {
         let category_id;
 
         if (categoryRows.length === 0) {
-            // Категория не найдена - создаем новую
-            console.log(`Создаем новую категорию "${category}" для пользователя ${user_id}`);
-            
             const [categoryResult] = await db.execute(
                 `INSERT INTO Category (user_id, name) VALUES (?, ?)`,
                 [user_id, category]
             );
-            
             category_id = categoryResult.insertId;
         } else {
-            // Категория найдена - используем существующую
             category_id = categoryRows[0].id;
+        }
+
+        // 🔥 ФИКС: Правильно обрабатываем дату с учетом часового пояса
+        let operationDate;
+        
+        if (created_at) {
+            // Дата пришла от клиента в UTC, нужно сохранить как есть
+            const clientDate = new Date(created_at);
+            
+            if (isNaN(clientDate.getTime())) {
+                return res.status(400).json({ error: 'Неверный формат даты' });
+            }
+            
+            // 🔥 Сохраняем UTC дату как есть, фронтенд сам будет конвертировать в свой часовой пояс
+            operationDate = clientDate.toISOString()
+                .replace('T', ' ')
+                .replace(/\.\d{3}Z$/, '');
+                
+            console.log('📅 Date from client:', {
+                original: created_at,
+                clientDate: clientDate.toString(),
+                savedToDB: operationDate,
+                userTimezone: timezone || 'not provided'
+            });
+        } else {
+            // Если дата не указана, используем текущее время UTC
+            const now = new Date();
+            operationDate = now.toISOString()
+                .replace('T', ' ')
+                .replace(/\.\d{3}Z$/, '');
         }
 
         // Создаем операцию
@@ -213,11 +237,11 @@ const createOperation = async (req, res) => {
                 operation_type_id,
                 description || null,
                 parseFloat(amount),
-                created_at || new Date()
+                operationDate
             ]
         );
 
-        // Получаем созданную операцию с join'ами
+        // Получаем созданную операцию
         const [newOperationRows] = await db.execute(
             `SELECT 
                 o.id,
@@ -243,7 +267,7 @@ const createOperation = async (req, res) => {
             user_id: operation.user_id,
             description: operation.description,
             amount: operation.amount,
-            created_at: operation.created_at,
+            created_at: operation.created_at, // 🔥 Возвращаем как есть из БД
             operation: operation.operation_type_name,
             category: operation.category_name,
             message: 'Операция успешно создана'
@@ -252,7 +276,6 @@ const createOperation = async (req, res) => {
     } catch (err) {
         console.error('Create operation error:', err);
         
-        // Более детальная обработка ошибок
         if (err.code === 'ER_DUP_ENTRY') {
             return res.status(400).json({ error: 'Категория с таким названием уже существует' });
         }
