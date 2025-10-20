@@ -1,106 +1,278 @@
+// controllers/category.controller.js
 const db = require('../db/db');
 
-// Все категории (дефолтные + пользовательские)
-const getAllCategories = async (req, res) => {
+// Получить все категории пользователя
+const getCategories = async (req, res) => {
   try {
-    const user_id = req.user.userId;
+    const userId = req.user.userId;
+    console.log('📥 Получение категорий для пользователя:', userId);
 
-    // сначала берём дефолтные
-    const [defaultRows] = await db.execute(
-      `SELECT id, name FROM category WHERE user_id IS NULL ORDER BY name`
-    );
+    const categoriesQuery = `
+      SELECT 
+        id, 
+        name, 
+        color,
+        user_id,
+        created_at,
+        'expense' as type
+      FROM category 
+      WHERE user_id = ? 
+      ORDER BY created_at DESC
+    `;
 
-    // потом кастомные
-    const [userRows] = await db.execute(
-      `SELECT id, name FROM category WHERE user_id = ? ORDER BY name`,
-      [user_id]
-    );
+    const [categories] = await db.execute(categoriesQuery, [userId]);
+    console.log('✅ Найдено категорий:', categories.length);
 
-    res.json([...defaultRows, ...userRows]);
+    return res.status(200).json(categories);
+
   } catch (err) {
-    console.error('Error fetching categories:', err);
-    res.status(500).json({ message: 'Ошибка загрузки категорий' });
+    console.error('❌ Ошибка при получении категорий:', err);
+    return res.status(500).json({ error: 'Ошибка сервера при загрузке категорий' });
   }
 };
 
-// Только пользовательские категории
-const getUserCategories = async (req, res) => {
+// Получить категории пользователя (альтернативный endpoint)
+const getCategoriesByUserId = async (req, res) => {
   try {
-    const user_id = req.user.userId;
+    const userId = req.user.userId;
+    
+    const categoriesQuery = `
+      SELECT 
+        id, 
+        name, 
+        color,
+        user_id,
+        created_at,
+        'expense' as type
+      FROM category 
+      WHERE user_id = ? 
+      ORDER BY created_at DESC
+    `;
 
-    const [rows] = await db.execute(
-      `SELECT id, name FROM category WHERE user_id = ? ORDER BY name`,
-      [user_id]
-    );
+    const [categories] = await db.execute(categoriesQuery, [userId]);
+    
+    return res.status(200).json(categories);
 
-    // Если у пользователя нет категорий → вернуть дефолтные
-    if (rows.length === 0) {
-      return res.status(200).json([
-        { id: 1, name: 'Еда' },
-        { id: 2, name: 'Транспорт' },
-        { id: 3, name: 'Жилье' },
-        { id: 4, name: 'Магазины' },
-        { id: 5, name: 'Здоровье' },
-        { id: 6, name: 'Развлечения' },
-        { id: 7, name: 'Одежда' },
-        { id: 8, name: 'Техника' },
-        { id: 9, name: 'Путешествия' },
-        { id: 10, name: 'Образование' },
-        { id: 11, name: 'Коммуналка' },
-        { id: 12, name: 'Подписки' },
-      ]);
-    }
-
-    res.json(rows);
   } catch (err) {
-    console.error('Error fetching user categories:', err);
-    res.status(500).json({ message: 'Ошибка загрузки категорий' });
+    console.error('Ошибка при получении категорий пользователя:', err);
+    return res.status(500).json({ error: 'Ошибка сервера при загрузке категорий' });
   }
 };
 
-// Добавить свою категорию
-const addUserCategory = async (req, res) => {
+// Проверить лимит категорий
+const checkCategoryLimit = async (req, res) => {
   try {
-    const user_id = req.user.userId;
-    const { name } = req.body;
+    const userId = req.user.userId;
+    console.log('📊 Проверка лимита для пользователя:', userId);
 
-    if (!name) {
-      return res.status(400).json({ message: 'Название обязательно' });
+    // Проверяем, премиум ли пользователь
+    const userQuery = `SELECT is_premium FROM user WHERE id = ?`;
+    const [userResult] = await db.execute(userQuery, [userId]);
+    
+    if (userResult.length === 0) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
-    const [result] = await db.execute(
-      `INSERT INTO category (name, user_id) VALUES (?, ?)`,
-      [name, user_id]
-    );
+    const isPremium = userResult[0]?.is_premium === 1;
+    console.log('👤 Премиум статус:', isPremium);
 
-    res.status(201).json({ id: result.insertId, name });
+    // Считаем текущее количество категорий
+    const countQuery = `SELECT COUNT(*) as count FROM category WHERE user_id = ?`;
+    const [countResult] = await db.execute(countQuery, [userId]);
+    const current = countResult[0].count;
+
+    const limit = isPremium ? 999 : 6;
+
+    console.log('📈 Лимит категорий:', { current, limit, isPremium });
+
+    return res.status(200).json({
+      current,
+      limit,
+      isPremium
+    });
+
   } catch (err) {
-    console.error('Error adding category:', err);
-    res.status(500).json({ message: 'Ошибка добавления категории' });
+    console.error('❌ Ошибка при проверке лимита:', err);
+    return res.status(500).json({ error: 'Ошибка сервера при проверке лимита' });
+  }
+};
+
+// Создать категорию
+const createCategory = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { name, color } = req.body;
+
+    console.log('🆕 Создание категории:', { name, color, userId });
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Название категории обязательно' });
+    }
+
+    if (name.trim().length > 20) {
+      return res.status(400).json({ error: 'Название не должно превышать 20 символов' });
+    }
+
+    // Проверяем лимит
+    const userQuery = `SELECT is_premium FROM user WHERE id = ?`;
+    const [userResult] = await db.execute(userQuery, [userId]);
+    
+    if (userResult.length === 0) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+
+    const isPremium = userResult[0]?.is_premium === 1;
+
+    const countQuery = `SELECT COUNT(*) as count FROM category WHERE user_id = ?`;
+    const [countResult] = await db.execute(countQuery, [userId]);
+    const currentCount = countResult[0].count;
+
+    if (!isPremium && currentCount >= 6) {
+      return res.status(403).json({ 
+        error: 'Достигнут лимит категорий. Обновите до премиум для создания большего количества.' 
+      });
+    }
+
+    const insertQuery = `
+      INSERT INTO category (name, color, user_id, created_at)
+      VALUES (?, ?, ?, NOW())
+    `;
+
+    const [result] = await db.execute(insertQuery, [
+      name.trim(), 
+      color || '#4ECDC4',
+      userId
+    ]);
+
+    console.log('✅ Категория создана с ID:', result.insertId);
+
+    // Получаем созданную категорию
+    const categoryQuery = `
+      SELECT 
+        id, 
+        name, 
+        color,
+        user_id,
+        created_at,
+        'expense' as type
+      FROM category 
+      WHERE id = ?
+    `;
+    
+    const [categoryResult] = await db.execute(categoryQuery, [result.insertId]);
+
+    return res.status(201).json(categoryResult[0]);
+
+  } catch (err) {
+    console.error('❌ Ошибка при создании категории:', err);
+    return res.status(500).json({ error: 'Ошибка сервера при создании категории' });
+  }
+};
+
+// Обновить категорию
+const updateCategory = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const categoryId = req.params.id;
+    const { name, color } = req.body;
+
+    console.log('✏️ Обновление категории:', { categoryId, name, color, userId });
+
+    // Проверяем, что категория принадлежит пользователю
+    const checkQuery = `SELECT * FROM category WHERE id = ? AND user_id = ?`;
+    const [checkResult] = await db.execute(checkQuery, [categoryId, userId]);
+
+    if (checkResult.length === 0) {
+      return res.status(404).json({ error: 'Категория не найдена' });
+    }
+
+    if (name && name.trim().length > 20) {
+      return res.status(400).json({ error: 'Название не должно превышать 20 символов' });
+    }
+
+    const updateQuery = `
+      UPDATE category 
+      SET 
+        name = COALESCE(?, name), 
+        color = COALESCE(?, color)
+      WHERE id = ? AND user_id = ?
+    `;
+
+    await db.execute(updateQuery, [
+      name ? name.trim() : null, 
+      color || null,
+      categoryId, 
+      userId
+    ]);
+
+    console.log('✅ Категория обновлена');
+
+    // Получаем обновленную категорию
+    const categoryQuery = `
+      SELECT 
+        id, 
+        name, 
+        color,
+        user_id,
+        created_at,
+        'expense' as type
+      FROM category 
+      WHERE id = ?
+    `;
+    const [categoryResult] = await db.execute(categoryQuery, [categoryId]);
+
+    return res.status(200).json(categoryResult[0]);
+
+  } catch (err) {
+    console.error('❌ Ошибка при обновлении категории:', err);
+    return res.status(500).json({ error: 'Ошибка сервера при обновлении категории' });
   }
 };
 
 // Удалить категорию
-const deleteUserCategory = async (req, res) => {
+const deleteCategory = async (req, res) => {
   try {
-    const user_id = req.user.userId;
+    const userId = req.user.userId;
     const categoryId = req.params.id;
 
-    await db.execute(
-      `DELETE FROM category WHERE id = ? AND user_id = ?`,
-      [categoryId, user_id]
-    );
+    console.log('🗑️ Удаление категории:', { categoryId, userId });
 
-    res.json({ message: 'Категория удалена' });
+    // Проверяем, что категория принадлежит пользователю
+    const checkQuery = `SELECT * FROM category WHERE id = ? AND user_id = ?`;
+    const [checkResult] = await db.execute(checkQuery, [categoryId, userId]);
+
+    if (checkResult.length === 0) {
+      return res.status(404).json({ error: 'Категория не найдена' });
+    }
+
+    // Проверяем, нет ли операций с этой категорией
+    const operationsQuery = `SELECT COUNT(*) as count FROM operation WHERE category_id = ?`;
+    const [operationsResult] = await db.execute(operationsQuery, [categoryId]);
+
+    if (operationsResult[0].count > 0) {
+      return res.status(400).json({ 
+        error: 'Нельзя удалить категорию, так как с ней связаны операции. Сначала удалите или переместите операции.' 
+      });
+    }
+
+    const deleteQuery = `DELETE FROM category WHERE id = ? AND user_id = ?`;
+    await db.execute(deleteQuery, [categoryId, userId]);
+
+    console.log('✅ Категория удалена');
+
+    return res.status(200).json({ message: 'Категория удалена' });
+
   } catch (err) {
-    console.error('Error deleting category:', err);
-    res.status(500).json({ message: 'Ошибка удаления категории' });
+    console.error('❌ Ошибка при удалении категории:', err);
+    return res.status(500).json({ error: 'Ошибка сервера при удалении категории' });
   }
 };
 
 module.exports = {
-  getAllCategories,
-  getUserCategories,
-  addUserCategory,
-  deleteUserCategory
+  getCategories,
+  getCategoriesByUserId,
+  checkCategoryLimit,
+  createCategory,
+  updateCategory,
+  deleteCategory
 };

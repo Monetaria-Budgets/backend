@@ -13,7 +13,7 @@ const getAllOperations = async (req, res) => {
                 o.description,
                 o.amount,
                 o.created_at,
-                c.name as category_name,
+                COALESCE(c.name, o.custom_category) as category_name,
                 ot.name as operation_type_name
             FROM Operation o
             LEFT JOIN Category c ON o.category_id = c.id
@@ -60,7 +60,7 @@ const getOperationById = async (req, res) => {
                 o.description,
                 o.amount,
                 o.created_at,
-                c.name as category_name,
+                COALESCE(c.name, o.custom_category) as category_name,
                 ot.name as operation_type_name
             FROM Operation o
             LEFT JOIN Category c ON o.category_id = c.id
@@ -108,7 +108,7 @@ const getOperationsByUserId = async (req, res) => {
                 o.description,
                 o.amount,
                 o.created_at,
-                c.name as category_name,
+                COALESCE(c.name, o.custom_category) as category_name,
                 ot.name as operation_type_name
             FROM Operation o
             LEFT JOIN Category c ON o.category_id = c.id
@@ -130,8 +130,8 @@ const getOperationsByUserId = async (req, res) => {
         }
 
         if (category) {
-            query += ' AND c.name = ?';
-            params.push(category);
+            query += ' AND (c.name = ? OR o.custom_category = ?)';
+            params.push(category, category);
         }
 
         if (type) {
@@ -181,62 +181,86 @@ const createOperation = async (req, res) => {
         if (!amount || !category || !operation_type_id) {
             return res.status(400).json({ error: 'Все обязательные поля должны быть заполнены' });
         }
-
         if (isNaN(amount) || parseFloat(amount) <= 0) {
             return res.status(400).json({ error: 'Сумма должна быть положительным числом' });
         }
 
-        // Находим или создаем категорию
-        const [categoryRows] = await db.execute(
-            `SELECT id FROM Category WHERE user_id = ? AND name = ?`,
-            [user_id, category]
-        );
+        let category_id = null;
+        let custom_category = null;
 
-        let category_id;
-
-        if (categoryRows.length === 0) {
-            const [categoryResult] = await db.execute(
-                `INSERT INTO Category (user_id, name) VALUES (?, ?)`,
+        if (operation_type_id === 1) {
+            // ДОХОД: не используем category_id, сохраняем название в custom_category
+            custom_category = category;
+            category_id = null; // Явно устанавливаем null
+        } else {
+            // РАСХОД: ищем или создаём категорию
+            const [categoryRows] = await db.execute(
+                `SELECT id FROM Category WHERE user_id = ? AND name = ?`,
                 [user_id, category]
             );
-            category_id = categoryResult.insertId;
-        } else {
-            category_id = categoryRows[0].id;
+            
+            if (categoryRows.length === 0) {
+                // Проверка лимита
+                const [countResult] = await db.execute(
+                    `SELECT COUNT(*) as count FROM Category WHERE user_id = ?`,
+                    [user_id]
+                );
+                const [userResult] = await db.execute(
+                    `SELECT is_premium FROM user WHERE id = ?`,
+                    [user_id]
+                );
+                const isPremium = userResult[0]?.is_premium === 1;
+                const currentCount = countResult[0].count;
+                
+                if (!isPremium && currentCount >= 6) {
+                    return res.status(403).json({ 
+                        error: 'Достигнут лимит категорий расходов. Обновите до премиум для создания большего количества.' 
+                    });
+                }
+                
+                const [categoryResult] = await db.execute(
+                    `INSERT INTO Category (user_id, name) VALUES (?, ?)`,
+                    [user_id, category]
+                );
+                category_id = categoryResult.insertId;
+            } else {
+                category_id = categoryRows[0].id;
+            }
         }
 
-        // 🔥 ПРОСТО используем дату как есть от пользователя
+        // Форматирование даты
         let operationDate = created_at;
-        
         if (!operationDate) {
-            // Если дата не указана, используем текущее время
-            const now = new Date();
-            // Форматируем так же как на фронтенде
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const day = String(now.getDate()).padStart(2, '0');
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            const seconds = String(now.getSeconds()).padStart(2, '0');
-            operationDate = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+            operationDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+        } else {
+            // Убедимся, что дата в правильном формате
+            operationDate = new Date(operationDate).toISOString().slice(0, 19).replace('T', ' ');
         }
 
-        console.log('📅 Saving operation date as is:', operationDate);
+        console.log('📅 Saving operation with:', { 
+            category_id, 
+            custom_category,
+            operationDate 
+        });
 
-        // Создаем операцию
+        // 🔥 ВАЖНО: Проверяем, что значения не undefined
+        const insertData = [
+            user_id,
+            category_id,          
+            operation_type_id,
+            description || null,
+            parseFloat(amount),
+            operationDate,
+            custom_category       
+        ];
+
+        console.log('📝 Insert data:', insertData);
+
         const [result] = await db.execute(
-            `INSERT INTO Operation (user_id, category_id, operation_type_id, description, amount, created_at) 
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-                user_id,
-                category_id,
-                operation_type_id,
-                description || null,
-                parseFloat(amount),
-                operationDate
-            ]
+            `INSERT INTO Operation (user_id, category_id, operation_type_id, description, amount, created_at, custom_category) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            insertData
         );
-
-        console.log('✅ Operation created with id:', result.insertId);
 
         // Получаем созданную операцию
         const [newOperationRows] = await db.execute(
@@ -248,7 +272,7 @@ const createOperation = async (req, res) => {
                 o.description,
                 o.amount,
                 o.created_at,
-                c.name as category_name,
+                COALESCE(c.name, o.custom_category) as category_name,
                 ot.name as operation_type_name
             FROM Operation o
             LEFT JOIN Category c ON o.category_id = c.id
@@ -258,29 +282,220 @@ const createOperation = async (req, res) => {
         );
 
         const operation = newOperationRows[0];
-
+        
+        // Нормализуем тип операции для фронтенда
+        const normalizedOperationType = operation.operation_type_name === 'доход' ? 'income' : 'expense';
+        
         return res.status(201).json({
             id: operation.id,
             user_id: operation.user_id,
             description: operation.description,
             amount: operation.amount,
-            created_at: operation.created_at, // 🔥 Возвращаем как есть из БД
-            operation: operation.operation_type_name,
+            created_at: operation.created_at,
+            operation: normalizedOperationType, // 🔥 Используем нормализованное значение
             category: operation.category_name,
             message: 'Операция успешно создана'
         });
-
+        
     } catch (err) {
         console.error('🔴 Create operation error:', err);
+        console.error('🔴 Error details:', err.message);
+        return res.status(500).json({ error: 'Внутренняя ошибка сервера: ' + err.message });
+    }
+};
+
+const updateOperation = async (req, res) => {
+    try {
+        const operationId = req.params.id;
+        const userId = req.user.userId;
+        const { amount, category, description, operation_type_id, created_at } = req.body;
+
+        console.log('✏️ Updating operation:', {
+            operationId, userId, amount, category, description, operation_type_id, created_at
+        });
+
+        // Валидация
+        if (!amount || !category || !operation_type_id) {
+            return res.status(400).json({ error: 'Все обязательные поля должны быть заполнены' });
+        }
+
+        if (isNaN(amount) || parseFloat(amount) <= 0) {
+            return res.status(400).json({ error: 'Сумма должна быть положительным числом' });
+        }
+
+        // Проверяем, что операция принадлежит пользователю
+        const [checkRows] = await db.execute(
+            `SELECT * FROM Operation WHERE id = ? AND user_id = ?`,
+            [operationId, userId]
+        );
+
+        if (checkRows.length === 0) {
+            return res.status(404).json({ error: 'Операция не найдена' });
+        }
+
+        let category_id = null;
+        let custom_category = null;
+
+        // 🔥 Та же логика что и при создании
+        if (operation_type_id === 1) {
+            // ДОХОДЫ: сохраняем название как custom_category
+            custom_category = category;
+        } else {
+            // РАСХОДЫ: находим или создаем категорию
+            const [categoryRows] = await db.execute(
+                `SELECT id FROM Category WHERE user_id = ? AND name = ?`,
+                [userId, category]
+            );
+
+            if (categoryRows.length === 0) {
+                // Проверяем лимит категорий
+                const [countResult] = await db.execute(
+                    `SELECT COUNT(*) as count FROM Category WHERE user_id = ?`,
+                    [userId]
+                );
+                
+                const [userResult] = await db.execute(
+                    `SELECT is_premium FROM user WHERE id = ?`,
+                    [userId]
+                );
+                
+                const isPremium = userResult[0]?.is_premium === 1;
+                const currentCount = countResult[0].count;
+
+                if (!isPremium && currentCount >= 6) {
+                    return res.status(403).json({ 
+                        error: 'Достигнут лимит категорий расходов. Обновите до премиум для создания большего количества.' 
+                    });
+                }
+
+                // Создаем новую категорию
+                const [categoryResult] = await db.execute(
+                    `INSERT INTO Category (user_id, name) VALUES (?, ?)`,
+                    [userId, category]
+                );
+                category_id = categoryResult.insertId;
+            } else {
+                category_id = categoryRows[0].id;
+            }
+        }
+
+        // Форматируем дату если передана
+        let operationDate = created_at;
+        if (!operationDate) {
+            // Если дата не указана, оставляем старую
+            operationDate = checkRows[0].created_at;
+        }
+
+        console.log('📅 Updating operation date:', operationDate);
+
+        // Обновляем операцию
+        const [result] = await db.execute(
+            `UPDATE Operation 
+             SET category_id = ?, 
+                 operation_type_id = ?, 
+                 description = ?, 
+                 amount = ?, 
+                 created_at = ?,
+                 custom_category = ?
+             WHERE id = ? AND user_id = ?`,
+            [
+                category_id,
+                operation_type_id,
+                description || null,
+                parseFloat(amount),
+                operationDate,
+                custom_category,
+                operationId,
+                userId
+            ]
+        );
+
+        console.log('✅ Operation updated:', result.affectedRows);
+
+        // Получаем обновленную операцию
+        const [updatedOperationRows] = await db.execute(
+            `SELECT 
+                o.id,
+                o.user_id,
+                o.category_id,
+                o.operation_type_id,
+                o.description,
+                o.amount,
+                o.created_at,
+                COALESCE(c.name, o.custom_category) as category_name,
+                ot.name as operation_type_name
+            FROM Operation o
+            LEFT JOIN Category c ON o.category_id = c.id
+            LEFT JOIN OperationType ot ON o.operation_type_id = ot.id
+            WHERE o.id = ?`,
+            [operationId]
+        );
+
+        const operation = updatedOperationRows[0];
+
+        return res.status(200).json({
+            id: operation.id,
+            user_id: operation.user_id,
+            description: operation.description,
+            amount: operation.amount,
+            created_at: operation.created_at,
+            operation: operation.operation_type_name,
+            category: operation.category_name,
+            message: 'Операция успешно обновлена'
+        });
+
+    } catch (err) {
+        console.error('🔴 Update operation error:', err);
         console.error('🔴 Error details:', err.message);
         
         return res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 };
 
+const deleteOperation = async (req, res) => {
+    try {
+        const operationId = req.params.id;
+        const userId = req.user.userId;
+
+        console.log('🗑️ Deleting operation:', { operationId, userId });
+
+        // Проверяем, что операция принадлежит пользователю
+        const [checkRows] = await db.execute(
+            `SELECT * FROM Operation WHERE id = ? AND user_id = ?`,
+            [operationId, userId]
+        );
+
+        if (checkRows.length === 0) {
+            return res.status(404).json({ error: 'Операция не найдена' });
+        }
+
+        // Удаляем операцию
+        const [result] = await db.execute(
+            `DELETE FROM Operation WHERE id = ? AND user_id = ?`,
+            [operationId, userId]
+        );
+
+        console.log('✅ Operation deleted:', result.affectedRows);
+
+        return res.status(200).json({ 
+            message: 'Операция успешно удалена',
+            deletedId: operationId
+        });
+
+    } catch (err) {
+        console.error('🔴 Delete operation error:', err);
+        console.error('🔴 Error details:', err.message);
+        
+        return res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+};
+
+
 module.exports = {
     getAllOperations,
     getOperationById,
     getOperationsByUserId,
-    createOperation 
+    createOperation,
+    updateOperation,
+    deleteOperation
 };

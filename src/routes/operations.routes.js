@@ -1,14 +1,15 @@
+// routes/operations.routes.js
 const express = require('express');
 const router = express.Router();
 const { 
     getAllOperations, 
     getOperationById,
     getOperationsByUserId,
-    createOperation
+    createOperation,
+    updateOperation,
+    deleteOperation // 🔥 Добавляем новый контроллер
 } = require('../controllers/operation.controller');
 const auth = require('../middleware/auth');
-
-// 🆕 ВАЖНО: Сначала специфичные роуты, потом общие с параметрами
 
 // GET /operations/user → получить операции текущего пользователя с фильтрами
 router.get('/user', auth, getOperationsByUserId);
@@ -16,7 +17,13 @@ router.get('/user', auth, getOperationsByUserId);
 // GET /operations → получить все операции (админ)
 router.get('/', getAllOperations);
 
-// GET /operations/:id → получить операцию по ID (должен быть последним!)
+// PUT /operations/:id → обновить операцию
+router.put('/:id', auth, updateOperation);
+
+// DELETE /operations/:id → удалить операцию (🔥 НОВЫЙ РОУТ)
+router.delete('/:id', auth, deleteOperation);
+
+// GET /operations/:id → получить операцию по ID
 router.get('/:id', getOperationById);
 
 // POST /operations → создать новую операцию

@@ -112,7 +112,13 @@ class CurrencyController {
       
       const cbrData = await this.fetchRatesFromCBR();
       const valutes = cbrData.Valute;
+      
+      // ВАЖНО: Используем дату из данных ЦБ, а не текущую дату
+      const cbrDate = new Date(cbrData.Date).toISOString().split('T')[0];
       const currentDate = new Date().toISOString().split('T')[0];
+      
+      console.log('Дата курсов от ЦБ:', cbrDate);
+      console.log('Текущая дата:', currentDate);
       
       let updatedCount = 0;
       let errorCount = 0;
@@ -131,12 +137,19 @@ class CurrencyController {
 
           const currencyId = currency[0].id;
           
-          // Берем данные напрямую из ответа ЦБ
+          // Проверяем данные
           const currentRate = parseFloat(data.Value);
           const previousRate = parseFloat(data.Previous);
+          
+          if (isNaN(currentRate) || currentRate === 0) {
+            console.warn(`Некорректный курс для ${code}:`, currentRate);
+            continue;
+          }
+
           const changeAmount = currentRate - previousRate;
           const changePercentage = previousRate !== 0 ? (changeAmount / previousRate) * 100 : 0;
 
+          // Используем дату из ЦБ для вставки
           await db.execute(
             `INSERT INTO exchange_rate 
             (currency_id, rate, previous_rate, change_amount, change_percentage, date) 
@@ -153,11 +166,12 @@ class CurrencyController {
               previousRate,
               changeAmount,
               changePercentage,
-              currentDate
+              cbrDate // Используем дату ЦБ
             ]
           );
 
           updatedCount++;
+          console.log(`Обновлен курс ${code}: ${currentRate} (было: ${previousRate})`);
 
         } catch (currencyError) {
           console.error(`Ошибка при обработке валюты ${code}:`, currencyError);
@@ -173,7 +187,8 @@ class CurrencyController {
         data: { 
           updated: updatedCount, 
           errors: errorCount,
-          date: currentDate 
+          date: cbrDate,
+          currentDate: currentDate
         }
       });
 
@@ -223,7 +238,17 @@ class CurrencyController {
       } = req.query;
       
       const showPopular = popular === 'true';
-      const currentDate = new Date().toISOString().split('T')[0];
+      
+      // Сначала получаем самую свежую дату из базы
+      const [latestDateResult] = await db.execute(
+        'SELECT DISTINCT date FROM exchange_rate ORDER BY date DESC LIMIT 1'
+      );
+      
+      const currentDate = latestDateResult.length > 0 
+        ? latestDateResult[0].date 
+        : new Date().toISOString().split('T')[0];
+      
+      console.log('Используемая дата для курсов:', currentDate);
       
       let query = `
         SELECT 

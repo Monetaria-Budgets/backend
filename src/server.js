@@ -40,28 +40,14 @@ app.listen(PORT, () => {
 // Первоначальное обновление курсов через 2 секунды после запуска
 setTimeout(async () => {
   try {
-    console.log('Проверка инициализации валют...');
-    
-    // Проверяем, есть ли валюты кроме рубля
-    const [currencies] = await db.execute('SELECT COUNT(*) as count FROM currency WHERE code != "RUB"');
-    
-    if (currencies[0].count === 0) {
-      console.log('Валюты не инициализированы, запускаем инициализацию...');
-      const mockRes = {
-        json: (data) => console.log('✅ Валюты инициализированы:', data),
-        status: () => mockRes
-      };
-      
-      await currencyController.initializeCurrencies({}, mockRes);
-      
-      // После инициализации обновляем курсы
-      console.log('Обновляем курсы после инициализации...');
-      await currencyController.updateRates({}, mockRes);
-    } else {
-      console.log(`В БД уже есть ${currencies[0].count} валют`);
-    }
+    console.log('🔄 Обновляем курсы при запуске сервера...');
+    const mockRes = {
+      json: (data) => console.log('✅ Курсы обновлены при старте:', data),
+      status: (code) => ({ json: (err) => console.error(`❌ Ошибка ${code}:`, err) })
+    };
+    await currencyController.updateRates({}, mockRes);
   } catch (error) {
-    console.error('❌ Ошибка при автоматической инициализации валют:', error);
+    console.error('❌ Ошибка при обновлении курсов при старте:', error);
   }
 }, 3000);
 
@@ -90,5 +76,5 @@ const updateExpiredPremiums = async () => {
     }
 };
 
-setInterval(updateExpiredPremiums, 2 * 60 * 1000);
+setInterval(updateExpiredPremiums, 24 * 60 * 60 * 1000);
 updateExpiredPremiums();
