@@ -15,9 +15,13 @@ const authRoutes = require('./routes/auth.routes');
 const homeRoutes = require('./routes/home.routes');
 const statisticsRoutes = require('./routes/statistics.routes');
 const currenciesRoutes = require('./routes/currencies.routes');
+const spendingLimitsRoutes = require('./routes/spendingLimits.routes');
+const currencyController = require('./controllers/currency.controller');
+const premiumRoutes = require('./routes/premium.routes');
+
 
 const currencyCron = require('./cron/currency.cron');
-const currencyController = require('./controllers/currency.controller');
+
 
 currencyCron.init();
 
@@ -30,6 +34,9 @@ app.use('/auth', authRoutes);
 app.use('/home', homeRoutes);
 app.use('/statistics', statisticsRoutes);
 app.use('/currency', currenciesRoutes);
+app.use('/spending-limits', spendingLimitsRoutes);
+app.use('/premium', premiumRoutes);
+
 
 const PORT = process.env.PORT || 3000;
 

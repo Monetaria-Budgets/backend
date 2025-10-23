@@ -9,15 +9,23 @@ const getCategories = async (req, res) => {
 
     const categoriesQuery = `
       SELECT 
-        id, 
-        name, 
-        color,
-        user_id,
-        created_at,
-        'expense' as type
-      FROM category 
-      WHERE user_id = ? 
-      ORDER BY created_at DESC
+        c.id, 
+        c.name, 
+        c.color,
+        c.user_id,
+        c.created_at,
+        'expense' as type,
+        COALESCE((
+          SELECT SUM(o.amount) 
+          FROM operation o 
+          WHERE o.category_id = c.id 
+            AND o.user_id = c.user_id
+            AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
+            AND YEAR(o.created_at) = YEAR(CURRENT_DATE())
+        ), 0) as current_month_spent
+      FROM category c 
+      WHERE c.user_id = ? 
+      ORDER BY c.created_at DESC
     `;
 
     const [categories] = await db.execute(categoriesQuery, [userId]);
@@ -38,15 +46,23 @@ const getCategoriesByUserId = async (req, res) => {
     
     const categoriesQuery = `
       SELECT 
-        id, 
-        name, 
-        color,
-        user_id,
-        created_at,
-        'expense' as type
-      FROM category 
-      WHERE user_id = ? 
-      ORDER BY created_at DESC
+        c.id, 
+        c.name, 
+        c.color,
+        c.user_id,
+        c.created_at,
+        'expense' as type,
+        COALESCE((
+          SELECT SUM(o.amount) 
+          FROM operation o 
+          WHERE o.category_id = c.id 
+            AND o.user_id = c.user_id
+            AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
+            AND YEAR(o.created_at) = YEAR(CURRENT_DATE())
+        ), 0) as current_month_spent
+      FROM category c 
+      WHERE c.user_id = ? 
+      ORDER BY c.created_at DESC
     `;
 
     const [categories] = await db.execute(categoriesQuery, [userId]);
@@ -63,18 +79,17 @@ const getCategoriesByUserId = async (req, res) => {
 const checkCategoryLimit = async (req, res) => {
   try {
     const userId = req.user.userId;
-    console.log('📊 Проверка лимита для пользователя:', userId);
+    console.log('📊 Проверка лимита категорий для пользователя:', userId);
 
-    // Проверяем, премиум ли пользователь
-    const userQuery = `SELECT is_premium FROM user WHERE id = ?`;
-    const [userResult] = await db.execute(userQuery, [userId]);
+    // Проверяем премиум статус через таблицу premiumuser
+    const premiumQuery = `
+      SELECT * FROM premiumuser 
+      WHERE user_id = ? AND subscription_end > NOW()
+    `;
+    const [premiumResult] = await db.execute(premiumQuery, [userId]);
     
-    if (userResult.length === 0) {
-      return res.status(404).json({ error: 'Пользователь не найден' });
-    }
-
-    const isPremium = userResult[0]?.is_premium === 1;
-    console.log('👤 Премиум статус:', isPremium);
+    const isPremium = premiumResult.length > 0;
+    console.log('👤 Премиум статус для категорий:', isPremium);
 
     // Считаем текущее количество категорий
     const countQuery = `SELECT COUNT(*) as count FROM category WHERE user_id = ?`;
@@ -114,14 +129,12 @@ const createCategory = async (req, res) => {
     }
 
     // Проверяем лимит
-    const userQuery = `SELECT is_premium FROM user WHERE id = ?`;
-    const [userResult] = await db.execute(userQuery, [userId]);
-    
-    if (userResult.length === 0) {
-      return res.status(404).json({ error: 'Пользователь не найден' });
-    }
-
-    const isPremium = userResult[0]?.is_premium === 1;
+    const premiumQuery = `
+      SELECT * FROM premiumuser 
+      WHERE user_id = ? AND subscription_end > NOW()
+    `;
+    const [premiumResult] = await db.execute(premiumQuery, [userId]);
+    const isPremium = premiumResult.length > 0;
 
     const countQuery = `SELECT COUNT(*) as count FROM category WHERE user_id = ?`;
     const [countResult] = await db.execute(countQuery, [userId]);
@@ -154,7 +167,8 @@ const createCategory = async (req, res) => {
         color,
         user_id,
         created_at,
-        'expense' as type
+        'expense' as type,
+        0 as current_month_spent
       FROM category 
       WHERE id = ?
     `;
@@ -215,8 +229,16 @@ const updateCategory = async (req, res) => {
         color,
         user_id,
         created_at,
-        'expense' as type
-      FROM category 
+        'expense' as type,
+        COALESCE((
+          SELECT SUM(o.amount) 
+          FROM operation o 
+          WHERE o.category_id = c.id 
+            AND o.user_id = c.user_id
+            AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
+            AND YEAR(o.created_at) = YEAR(CURRENT_DATE())
+        ), 0) as current_month_spent
+      FROM category c 
       WHERE id = ?
     `;
     const [categoryResult] = await db.execute(categoryQuery, [categoryId]);

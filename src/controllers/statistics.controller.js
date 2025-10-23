@@ -3,13 +3,6 @@ const db = require('../db/db');
 
 // Вспомогательная функция для обработки категорий
 const processCategories = (categoriesResult) => {
-  const colors = [
-    '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', 
-    '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
-    '#FFA726', '#66BB6A', '#AB47BC', '#26C6DA', '#FFCA28',
-    '#42A5F5', '#7E57C2', '#26A69A', '#D4E157', '#FF7043'
-  ];
-
   const incomeCategories = [];
   const expenseCategories = [];
   
@@ -31,7 +24,7 @@ const processCategories = (categoriesResult) => {
       name: row.name,
       amount: parseFloat(row.amount),
       type: row.type === 'Доход' ? 'income' : 'expense',
-      color: colors[index % colors.length],
+      color: row.color || '#666666',
       transactionCount: row.transaction_count
     };
 
@@ -172,7 +165,7 @@ const calculateAdvancedMetrics = (transactions, categories, summary, period) => 
     financialHealthScore,
     
     // Рекомендации
-    recommendations: recommendations.slice(0, 3) // Максимум 3 рекомендации
+    recommendations: recommendations.slice(0, 3)
   };
 };
 
@@ -305,6 +298,7 @@ const getCategoryStats = async (userId, period) => {
   const categoriesQuery = `
     SELECT 
       c.name,
+      c.color,
       ot.name as type,
       SUM(o.amount) as amount,
       COUNT(o.id) as transaction_count
@@ -313,7 +307,7 @@ const getCategoryStats = async (userId, period) => {
     JOIN OperationType ot ON o.operation_type_id = ot.id
     WHERE o.user_id = ?
       AND (${dateCondition})
-    GROUP BY c.name, ot.name
+    GROUP BY c.name, c.color, ot.name
     ORDER BY ot.name, SUM(o.amount) DESC
   `;
 
@@ -321,7 +315,7 @@ const getCategoryStats = async (userId, period) => {
   return processCategories(categoriesResult);
 };
 
-// Получить ВСЕ транзакции за период (без лимита)
+// Получить ВСЕ транзакции за период
 const getAllTransactionsForPeriod = async (userId, period) => {
   let dateCondition = '';
 
@@ -476,11 +470,124 @@ const getAdditionalMetrics = async (userId, period) => {
   };
 };
 
+// Получить статистику по лимитам и превышениям
+const getLimitsStatistics = async (userId, period) => {
+  let dateCondition = '';
+
+  switch (period) {
+    case 'week':
+      dateCondition = `
+        o.created_at >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+        AND o.created_at < DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 7 DAY)
+      `;
+      break;
+    case 'month':
+      dateCondition = `
+        YEAR(o.created_at) = YEAR(CURDATE())
+        AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
+      `;
+      break;
+    case 'quarter':
+      dateCondition = `
+        YEAR(o.created_at) = YEAR(CURDATE())
+        AND QUARTER(o.created_at) = QUARTER(CURDATE())
+      `;
+      break;
+    case 'year':
+      dateCondition = `
+        YEAR(o.created_at) = YEAR(CURDATE())
+      `;
+      break;
+    default:
+      dateCondition = `
+        YEAR(o.created_at) = YEAR(CURDATE())
+        AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
+      `;
+  }
+
+  // Получаем все лимиты пользователя с текущими расходами
+  const limitsQuery = `
+    SELECT 
+      sl.id,
+      sl.category_id,
+      sl.amount as limit_amount,
+      c.name as category_name,
+      c.color as category_color,
+      COALESCE((
+        SELECT SUM(o.amount) 
+        FROM operation o 
+        WHERE o.category_id = sl.category_id 
+          AND o.user_id = sl.user_id
+          AND (${dateCondition})
+      ), 0) as current_spent
+    FROM spendinglimit sl
+    JOIN category c ON sl.category_id = c.id
+    WHERE sl.user_id = ?
+  `;
+
+  const [limitsResult] = await db.execute(limitsQuery, [userId]);
+
+  const limitsStats = {
+    totalLimits: limitsResult.length,
+    exceededLimits: 0,
+    nearExceededLimits: 0,
+    totalLimitAmount: 0,
+    totalSpent: 0,
+    totalExceededAmount: 0,
+    limits: []
+  };
+
+  limitsResult.forEach(limit => {
+    const currentSpent = parseFloat(limit.current_spent);
+    const limitAmount = parseFloat(limit.limit_amount);
+    const percentage = limitAmount > 0 ? (currentSpent / limitAmount) * 100 : 0;
+    const isExceeded = currentSpent > limitAmount;
+    const isNearExceeded = percentage >= 80 && percentage <= 100;
+    const exceededAmount = isExceeded ? currentSpent - limitAmount : 0;
+
+    limitsStats.totalLimitAmount += limitAmount;
+    limitsStats.totalSpent += currentSpent;
+    limitsStats.totalExceededAmount += exceededAmount;
+
+    if (isExceeded) {
+      limitsStats.exceededLimits++;
+    } else if (isNearExceeded) {
+      limitsStats.nearExceededLimits++;
+    }
+
+    limitsStats.limits.push({
+      id: limit.id,
+      categoryId: limit.category_id,
+      categoryName: limit.category_name,
+      categoryColor: limit.category_color,
+      limitAmount,
+      currentSpent,
+      percentage: Math.round(percentage * 100) / 100,
+      isExceeded,
+      isNearExceeded,
+      exceededAmount,
+      remainingAmount: Math.max(0, limitAmount - currentSpent)
+    });
+  });
+
+  // Рассчитываем дополнительные метрики
+  limitsStats.limitsUtilization = limitsStats.totalLimitAmount > 0 ? 
+    (limitsStats.totalSpent / limitsStats.totalLimitAmount) * 100 : 0;
+  limitsStats.averageLimitUsage = limitsStats.limits.length > 0 ?
+    limitsStats.limits.reduce((sum, limit) => sum + limit.percentage, 0) / limitsStats.limits.length : 0;
+
+  // Сортируем по проценту использования (от большего к меньшему)
+  limitsStats.limits.sort((a, b) => b.percentage - a.percentage);
+
+  return limitsStats;
+};
+
 // Вспомогательные функции для кастомного периода
 const getCategoryStatsCustom = async (userId, startDate, endDate) => {
   const categoriesQuery = `
     SELECT 
       c.name,
+      c.color,
       ot.name as type,
       SUM(o.amount) as amount,
       COUNT(o.id) as transaction_count
@@ -489,7 +596,7 @@ const getCategoryStatsCustom = async (userId, startDate, endDate) => {
     JOIN OperationType ot ON o.operation_type_id = ot.id
     WHERE o.user_id = ?
       AND o.created_at >= ? AND o.created_at <= ?
-    GROUP BY c.name, ot.name
+    GROUP BY c.name, c.color, ot.name
     ORDER BY ot.name, SUM(o.amount) DESC
   `;
 
@@ -497,7 +604,6 @@ const getCategoryStatsCustom = async (userId, startDate, endDate) => {
   return processCategories(categoriesResult);
 };
 
-// Получить ВСЕ транзакции для кастомного периода
 const getAllTransactionsCustom = async (userId, startDate, endDate) => {
   const transactionsQuery = `
     SELECT 
@@ -585,129 +691,145 @@ const getAdditionalMetricsCustom = async (userId, startDate, endDate) => {
   };
 };
 
-// Получить статистику за кастомный период
-const getCustomPeriodStatistics = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { startDate, endDate } = req.query;
+const getLimitsStatisticsCustom = async (userId, startDate, endDate) => {
+  const limitsQuery = `
+    SELECT 
+      sl.id,
+      sl.category_id,
+      sl.amount as limit_amount,
+      c.name as category_name,
+      c.color as category_color,
+      COALESCE((
+        SELECT SUM(o.amount) 
+        FROM operation o 
+        WHERE o.category_id = sl.category_id 
+          AND o.user_id = sl.user_id
+          AND o.created_at >= ? AND o.created_at <= ?
+      ), 0) as current_spent
+    FROM spendinglimit sl
+    JOIN category c ON sl.category_id = c.id
+    WHERE sl.user_id = ?
+  `;
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({ 
-        error: 'Необходимо указать startDate и endDate' 
-      });
+  const [limitsResult] = await db.execute(limitsQuery, [startDate, endDate, userId]);
+
+  const limitsStats = {
+    totalLimits: limitsResult.length,
+    exceededLimits: 0,
+    nearExceededLimits: 0,
+    totalLimitAmount: 0,
+    totalSpent: 0,
+    totalExceededAmount: 0,
+    limits: []
+  };
+
+  limitsResult.forEach(limit => {
+    const currentSpent = parseFloat(limit.current_spent);
+    const limitAmount = parseFloat(limit.limit_amount);
+    const percentage = limitAmount > 0 ? (currentSpent / limitAmount) * 100 : 0;
+    const isExceeded = currentSpent > limitAmount;
+    const isNearExceeded = percentage >= 80 && percentage <= 100;
+    const exceededAmount = isExceeded ? currentSpent - limitAmount : 0;
+
+    limitsStats.totalLimitAmount += limitAmount;
+    limitsStats.totalSpent += currentSpent;
+    limitsStats.totalExceededAmount += exceededAmount;
+
+    if (isExceeded) {
+      limitsStats.exceededLimits++;
+    } else if (isNearExceeded) {
+      limitsStats.nearExceededLimits++;
     }
 
-    // Валидация дат
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      return res.status(400).json({ error: 'Неверный формат даты' });
-    }
-
-    if (start > end) {
-      return res.status(400).json({ error: 'Начальная дата не может быть больше конечной' });
-    }
-
-    // Получаем статистику за кастомный период
-    const dateCondition = `
-      o.created_at >= ? AND o.created_at <= ?
-    `;
-
-    const summaryQuery = `
-      SELECT 
-        COALESCE(SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END), 0) AS total_income,
-        COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS total_expense,
-        COALESCE(SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END), 0) - 
-        COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS net_flow
-      FROM Operation o
-      JOIN OperationType ot ON o.operation_type_id = ot.id
-      WHERE o.user_id = ?
-        AND (${dateCondition})
-    `;
-
-    const dynamicsQuery = `
-      SELECT 
-        DATE(o.created_at) AS date,
-        SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END) AS income,
-        SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END) AS expense
-      FROM Operation o
-      JOIN OperationType ot ON o.operation_type_id = ot.id
-      WHERE o.user_id = ?
-        AND (${dateCondition})
-      GROUP BY DATE(o.created_at)
-      ORDER BY DATE(o.created_at) ASC
-    `;
-
-    const [summaryResult, dynamicsResult] = await Promise.all([
-      db.execute(summaryQuery, [userId, startDate, endDate]),
-      db.execute(dynamicsQuery, [userId, startDate, endDate])
-    ]);
-
-    const summaryData = summaryResult[0][0] || { 
-      total_income: 0, 
-      total_expense: 0, 
-      net_flow: 0 
-    };
-
-    const dynamicsData = dynamicsResult[0];
-
-    // Строим кумулятивный баланс для графика
-    let cumulativeBalance = 0;
-    const chartData = dynamicsData.map(row => {
-      cumulativeBalance += (row.income || 0) - (row.expense || 0);
-      return {
-        date: row.date instanceof Date 
-          ? row.date.toISOString().split('T')[0] 
-          : row.date, 
-        balance: cumulativeBalance
-      };
+    limitsStats.limits.push({
+      id: limit.id,
+      categoryId: limit.category_id,
+      categoryName: limit.category_name,
+      categoryColor: limit.category_color,
+      limitAmount,
+      currentSpent,
+      percentage: Math.round(percentage * 100) / 100,
+      isExceeded,
+      isNearExceeded,
+      exceededAmount,
+      remainingAmount: Math.max(0, limitAmount - currentSpent)
     });
+  });
 
-    // Получаем дополнительные данные
-    const [categories, allTransactions, additionalMetrics] = await Promise.all([
-      getCategoryStatsCustom(userId, startDate, endDate),
-      getAllTransactionsCustom(userId, startDate, endDate),
-      getAdditionalMetricsCustom(userId, startDate, endDate)
-    ]);
+  // Рассчитываем дополнительные метрики
+  limitsStats.limitsUtilization = limitsStats.totalLimitAmount > 0 ? 
+    (limitsStats.totalSpent / limitsStats.totalLimitAmount) * 100 : 0;
+  limitsStats.averageLimitUsage = limitsStats.limits.length > 0 ?
+    limitsStats.limits.reduce((sum, limit) => sum + limit.percentage, 0) / limitsStats.limits.length : 0;
 
-    // Расширенные метрики
-    const advancedMetrics = calculateAdvancedMetrics(
-      allTransactions, 
-      categories, 
-      {
-        netFlow: summaryData.net_flow,
-        income: summaryData.total_income,
-        expense: summaryData.total_expense
-      },
-      'custom'
-    );
+  // Сортируем по проценту использования (от большего к меньшему)
+  limitsStats.limits.sort((a, b) => b.percentage - a.percentage);
 
-    const result = {
-      period: 'custom',
-      periodLabel: `${startDate} - ${endDate}`,
-      summary: {
-        netFlow: summaryData.net_flow,
-        income: summaryData.total_income,
-        expense: summaryData.total_expense
-      },
-      dynamics: chartData,
-      categories,
-      recentTransactions: allTransactions.slice(0, 5),
-      allTransactions,
-      ...additionalMetrics,
-      ...advancedMetrics
-    };
-
-    return res.status(200).json(result);
-
-  } catch (err) {
-    console.error('Ошибка при получении статистики за кастомный период:', err);
-    return res.status(500).json({ error: 'Ошибка сервера при загрузке статистики' });
-  }
+  return limitsStats;
 };
 
-// Основная функция получения статистики (совместимость со старым кодом)
+const getBasicStatisticsCustom = async (userId, startDate, endDate) => {
+  const summaryQuery = `
+    SELECT 
+      COALESCE(SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END), 0) AS total_income,
+      COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS total_expense,
+      COALESCE(SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END), 0) - 
+      COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS net_flow
+    FROM Operation o
+    JOIN OperationType ot ON o.operation_type_id = ot.id
+    WHERE o.user_id = ?
+      AND o.created_at >= ? AND o.created_at <= ?
+  `;
+
+  const dynamicsQuery = `
+    SELECT 
+      DATE(o.created_at) AS date,
+      SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END) AS income,
+      SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END) AS expense
+    FROM Operation o
+    JOIN OperationType ot ON o.operation_type_id = ot.id
+    WHERE o.user_id = ?
+      AND o.created_at >= ? AND o.created_at <= ?
+    GROUP BY DATE(o.created_at)
+    ORDER BY DATE(o.created_at) ASC
+  `;
+
+  const [summaryResult, dynamicsResult] = await Promise.all([
+    db.execute(summaryQuery, [userId, startDate, endDate]),
+    db.execute(dynamicsQuery, [userId, startDate, endDate])
+  ]);
+
+  const summaryData = summaryResult[0][0] || { 
+    total_income: 0, 
+    total_expense: 0, 
+    net_flow: 0 
+  };
+
+  const dynamicsData = dynamicsResult[0];
+
+  // Строим кумулятивный баланс для графика
+  let cumulativeBalance = 0;
+  const chartData = dynamicsData.map(row => {
+    cumulativeBalance += (row.income || 0) - (row.expense || 0);
+    return {
+      date: row.date instanceof Date 
+        ? row.date.toISOString().split('T')[0] 
+        : row.date, 
+      balance: cumulativeBalance
+    };
+  });
+
+  return {
+    summary: {
+      netFlow: summaryData.net_flow,
+      income: summaryData.total_income,
+      expense: summaryData.total_expense
+    },
+    dynamics: chartData
+  };
+};
+
+// Основная функция получения статистики
 const getStatisticsByPeriod = async (req, res) => {
   try {
     const userId = req.user.userId;
@@ -741,11 +863,12 @@ const getExtendedStatistics = async (req, res) => {
     }
 
     // Получаем все данные параллельно для производительности
-    const [basicStats, categories, allTransactions, additionalMetrics] = await Promise.all([
+    const [basicStats, categories, allTransactions, additionalMetrics, limitsStats] = await Promise.all([
       getBasicStatistics(userId, period),
       getCategoryStats(userId, period),
       getAllTransactionsForPeriod(userId, period),
-      getAdditionalMetrics(userId, period)
+      getAdditionalMetrics(userId, period),
+      getLimitsStatistics(userId, period)
     ]);
 
     // Расширенные метрики с оценками
@@ -764,7 +887,8 @@ const getExtendedStatistics = async (req, res) => {
       recentTransactions: allTransactions.slice(0, 5),
       allTransactions,
       ...additionalMetrics,
-      ...advancedMetrics
+      ...advancedMetrics,
+      limitsStats
     };
 
     console.log(`✅ Расширенная статистика загружена:`, {
@@ -772,6 +896,8 @@ const getExtendedStatistics = async (req, res) => {
       incomeCount: extendedStats.incomeCount,
       expenseCount: extendedStats.expenseCount,
       categories: extendedStats.categories.length,
+      limits: extendedStats.limitsStats.totalLimits,
+      exceededLimits: extendedStats.limitsStats.exceededLimits,
       income: extendedStats.summary.income,
       expense: extendedStats.summary.expense,
       financialHealth: extendedStats.financialHealthRating,
@@ -789,6 +915,7 @@ const getExtendedStatistics = async (req, res) => {
       const period = req.query.period || 'month';
       
       const basicStats = await getBasicStatistics(userId, period);
+      const limitsStats = await getLimitsStatistics(userId, period);
       
       return res.status(200).json({
         period,
@@ -816,6 +943,7 @@ const getExtendedStatistics = async (req, res) => {
         financialStability: 0,
         financialHealthRating: 'fair',
         financialHealthScore: 3,
+        limitsStats,
         recommendations: ['Начните добавлять транзакции для анализа']
       });
       
@@ -826,6 +954,68 @@ const getExtendedStatistics = async (req, res) => {
         details: err.message 
       });
     }
+  }
+};
+
+// Получить статистику за кастомный период
+const getCustomPeriodStatistics = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { startDate, endDate } = req.query;
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ 
+        error: 'Необходимо указать startDate и endDate' 
+      });
+    }
+
+    // Валидация дат
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({ error: 'Неверный формат даты' });
+    }
+
+    if (start > end) {
+      return res.status(400).json({ error: 'Начальная дата не может быть больше конечной' });
+    }
+
+    // Получаем все данные параллельно
+    const [basicStats, categories, allTransactions, additionalMetrics, limitsStats] = await Promise.all([
+      getBasicStatisticsCustom(userId, startDate, endDate),
+      getCategoryStatsCustom(userId, startDate, endDate),
+      getAllTransactionsCustom(userId, startDate, endDate),
+      getAdditionalMetricsCustom(userId, startDate, endDate),
+      getLimitsStatisticsCustom(userId, startDate, endDate)
+    ]);
+
+    // Расширенные метрики с оценками
+    const advancedMetrics = calculateAdvancedMetrics(
+      allTransactions, 
+      categories, 
+      basicStats.summary,
+      'custom'
+    );
+
+    const result = {
+      period: 'custom',
+      periodLabel: `${startDate} - ${endDate}`,
+      summary: basicStats.summary,
+      dynamics: basicStats.dynamics,
+      categories,
+      recentTransactions: allTransactions.slice(0, 5),
+      allTransactions,
+      ...additionalMetrics,
+      ...advancedMetrics,
+      limitsStats
+    };
+
+    return res.status(200).json(result);
+
+  } catch (err) {
+    console.error('Ошибка при получении статистики за кастомный период:', err);
+    return res.status(500).json({ error: 'Ошибка сервера при загрузке статистики' });
   }
 };
 
@@ -865,6 +1055,7 @@ const getLifetimeStatistics = async (req, res) => {
     const popularCategoriesQuery = `
       SELECT 
         c.name,
+        c.color,
         COUNT(o.id) as count,
         SUM(o.amount) as total_amount,
         ot.name as type
@@ -872,7 +1063,7 @@ const getLifetimeStatistics = async (req, res) => {
       JOIN Category c ON o.category_id = c.id
       JOIN OperationType ot ON o.operation_type_id = ot.id
       WHERE o.user_id = ?
-      GROUP BY c.name, ot.name
+      GROUP BY c.name, c.color, ot.name
       ORDER BY COUNT(o.id) DESC
       LIMIT 10
     `;
@@ -917,6 +1108,7 @@ const getLifetimeStatistics = async (req, res) => {
       },
       popularCategories: popularCategoriesResult.map(row => ({
         name: row.name,
+        color: row.color || '#666666',
         count: parseInt(row.count),
         totalAmount: parseFloat(row.total_amount),
         type: row.type === 'Доход' ? 'income' : 'expense'
@@ -936,9 +1128,32 @@ const getLifetimeStatistics = async (req, res) => {
   }
 };
 
+// Получить только статистику по лимитам
+const getLimitsStatisticsEndpoint = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const period = req.query.period || 'month';
+    const { startDate, endDate } = req.query;
+
+    let limitsStats;
+    if (period === 'custom' && startDate && endDate) {
+      limitsStats = await getLimitsStatisticsCustom(userId, startDate, endDate);
+    } else {
+      limitsStats = await getLimitsStatistics(userId, period);
+    }
+
+    return res.status(200).json(limitsStats);
+
+  } catch (err) {
+    console.error('Ошибка при получении статистики по лимитам:', err);
+    return res.status(500).json({ error: 'Ошибка сервера при загрузке статистики по лимитам' });
+  }
+};
+
 module.exports = {
   getStatisticsByPeriod,
   getExtendedStatistics,
   getLifetimeStatistics,
-  getCustomPeriodStatistics
+  getCustomPeriodStatistics,
+  getLimitsStatistics: getLimitsStatisticsEndpoint
 };
