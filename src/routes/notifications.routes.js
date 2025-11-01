@@ -1,30 +1,51 @@
-// const express = require('express');
-// const router = express.Router();
-// const auth = require('../middleware/auth');
-// const {
-//   getNotificationsByUserId,
-//   markNotificationAsRead,
-//   markAllNotificationsAsRead,
-//   getUnreadCount,
-//   createNotification
-// } = require('../controllers/notification.controller');
+const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
+const {
+  getUserNotifications,
+  getUnreadNotifications,
+  markAsRead,
+  markAllAsRead,
+  deleteNotification,
+  getUnreadCount,
+  sendTestNotification,
+  testConnection,
+  createScheduledNotification,
+  sendNotificationToUser,
+  getFutureNotifications, // ← ДОБАВЛЕНО
+} = require('../controllers/notification.controller');
 
-// // Все роуты требуют аутентификации
-// router.use(auth);
+// Тест подключения
+router.get('/test', auth, testConnection);
 
-// // GET /notifications/user/me → получить уведомления текущего пользователя
-// router.get('/user/me', getNotificationsByUserId);
+// Получить уведомления пользователя
+router.get('/', auth, getUserNotifications);
 
-// // GET /notifications/user/me/unread-count → количество непрочитанных
-// router.get('/user/me/unread-count', getUnreadCount);
+// Получить непрочитанные уведомления
+router.get('/unread', auth, getUnreadNotifications);
 
-// // PUT /notifications/:id/read → пометить уведомление как прочитанное
-// router.put('/:id/read', markNotificationAsRead);
+// Получить количество непрочитанных уведомлений
+router.get('/unread-count', auth, getUnreadCount);
 
-// // PUT /notifications/user/me/read-all → пометить все как прочитанные
-// router.put('/user/me/read-all', markAllNotificationsAsRead);
+// Получить будущие уведомления
+router.get('/future', auth, getFutureNotifications); // ← ДОБАВЛЕНО
 
-// // POST /notifications → создать новое уведомление (админ)
-// router.post('/', createNotification);
+// Пометить уведомление как прочитанное
+router.patch('/:notificationId/read', auth, markAsRead);
 
-// module.exports = router;
+// Пометить все уведомления как прочитанные
+router.patch('/mark-all-read', auth, markAllAsRead);
+
+// Удалить уведомление
+router.delete('/:notificationId', auth, deleteNotification);
+
+// Тестовое уведомление (текущему пользователю)
+router.post('/test', auth, sendTestNotification);
+
+// Создать отложенное уведомление (текущему пользователю)
+router.post('/scheduled', auth, createScheduledNotification);
+
+// Отправить уведомление конкретному пользователю (админ)
+router.post('/admin/send-to-user', auth, sendNotificationToUser);
+
+module.exports = router;

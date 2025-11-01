@@ -1,4 +1,4 @@
-// controllers/operation.controller.js
+// controllers/operation.controller.js - ИСПРАВЛЕННАЯ ВЕРСИЯ
 const db = require('../db/db');
 
 // Получить все операции
@@ -169,7 +169,7 @@ const getOperationsByUserId = async (req, res) => {
     }
 };
 
-// 🔥 ИСПРАВЛЕННАЯ функция создания операции
+// 🔥 ИСПРАВЛЕННАЯ функция создания операции - ФИКС ВРЕМЕНИ
 const createOperation = async (req, res) => {
     try {
         const { amount, category, description, operation_type_id, created_at } = req.body;
@@ -230,13 +230,25 @@ const createOperation = async (req, res) => {
             }
         }
 
-        // Форматирование даты
-        let operationDate = created_at;
-        if (!operationDate) {
-            operationDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+        // 🔥 ФИКС ВРЕМЕНИ: Сохраняем время как есть, без конвертации в UTC
+        let operationDate;
+        if (created_at) {
+            // Если дата передана с фронтенда, используем её как есть
+            operationDate = created_at;
+            console.log('📅 Using provided date:', operationDate);
         } else {
-            // Убедимся, что дата в правильном формате
-            operationDate = new Date(operationDate).toISOString().slice(0, 19).replace('T', ' ');
+            // Если дата не передана, используем текущее время сервера
+            operationDate = new Date();
+            // Форматируем в локальное время сервера
+            const year = operationDate.getFullYear();
+            const month = String(operationDate.getMonth() + 1).padStart(2, '0');
+            const day = String(operationDate.getDate()).padStart(2, '0');
+            const hours = String(operationDate.getHours()).padStart(2, '0');
+            const minutes = String(operationDate.getMinutes()).padStart(2, '0');
+            const seconds = String(operationDate.getSeconds()).padStart(2, '0');
+            
+            operationDate = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+            console.log('📅 Using current server date:', operationDate);
         }
 
         console.log('📅 Saving operation with:', { 
@@ -252,7 +264,7 @@ const createOperation = async (req, res) => {
             operation_type_id,
             description || null,
             parseFloat(amount),
-            operationDate,
+            operationDate, // 🔥 Используем отформатированную дату
             custom_category       
         ];
 
@@ -306,6 +318,7 @@ const createOperation = async (req, res) => {
     }
 };
 
+// 🔥 ИСПРАВЛЕННАЯ функция обновления операции - ФИКС ВРЕМЕНИ
 const updateOperation = async (req, res) => {
     try {
         const operationId = req.params.id;
@@ -381,14 +394,17 @@ const updateOperation = async (req, res) => {
             }
         }
 
-        // Форматируем дату если передана
-        let operationDate = created_at;
-        if (!operationDate) {
+        // 🔥 ФИКС ВРЕМЕНИ: Сохраняем время как есть
+        let operationDate;
+        if (created_at) {
+            // Используем переданную дату как есть
+            operationDate = created_at;
+            console.log('📅 Using provided date for update:', operationDate);
+        } else {
             // Если дата не указана, оставляем старую
             operationDate = checkRows[0].created_at;
+            console.log('📅 Keeping existing date:', operationDate);
         }
-
-        console.log('📅 Updating operation date:', operationDate);
 
         // Обновляем операцию
         const [result] = await db.execute(
@@ -405,7 +421,7 @@ const updateOperation = async (req, res) => {
                 operation_type_id,
                 description || null,
                 parseFloat(amount),
-                operationDate,
+                operationDate, // 🔥 Используем отформатированную дату
                 custom_category,
                 operationId,
                 userId
@@ -491,7 +507,6 @@ const deleteOperation = async (req, res) => {
         return res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 };
-
 
 module.exports = {
     getAllOperations,
