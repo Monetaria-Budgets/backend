@@ -15,13 +15,15 @@ const getAllOperations = async (req, res) => {
                 o.created_at,
                 COALESCE(c.name, o.custom_category) as category_name,
                 ot.name as operation_type_name
-            FROM Operation o
-            LEFT JOIN Category c ON o.category_id = c.id
-            LEFT JOIN OperationType ot ON o.operation_type_id = ot.id`
+            FROM operation o
+            LEFT JOIN category c ON o.category_id = c.id
+            LEFT JOIN operationtype ot ON o.operation_type_id = ot.id`
         );
 
+        console.log('🟢 Query completed, found:', rows.length);
+
         if (rows.length === 0) {
-            return res.status(409).json({ error: 'Операции не найдены' });
+            return res.status(404).json({ error: 'Операции не найдены' });
         }
 
         const operations = rows.map(operation => ({
@@ -62,9 +64,9 @@ const getOperationById = async (req, res) => {
                 o.created_at,
                 COALESCE(c.name, o.custom_category) as category_name,
                 ot.name as operation_type_name
-            FROM Operation o
-            LEFT JOIN Category c ON o.category_id = c.id
-            LEFT JOIN OperationType ot ON o.operation_type_id = ot.id
+            FROM operation o
+            LEFT JOIN category c ON o.category_id = c.id
+            LEFT JOIN operationtype ot ON o.operation_type_id = ot.id
             WHERE o.id = ?`
         );
 
@@ -110,9 +112,9 @@ const getOperationsByUserId = async (req, res) => {
                 o.created_at,
                 COALESCE(c.name, o.custom_category) as category_name,
                 ot.name as operation_type_name
-            FROM Operation o
-            LEFT JOIN Category c ON o.category_id = c.id
-            LEFT JOIN OperationType ot ON o.operation_type_id = ot.id
+            FROM operation o
+            LEFT JOIN category c ON o.category_id = c.id
+            LEFT JOIN operationtype ot ON o.operation_type_id = ot.id
             WHERE o.user_id = ?
         `;
 
@@ -195,14 +197,14 @@ const createOperation = async (req, res) => {
         } else {
             // РАСХОД: ищем или создаём категорию
             const [categoryRows] = await db.execute(
-                `SELECT id FROM Category WHERE user_id = ? AND name = ?`,
+                `SELECT id FROM category WHERE user_id = ? AND name = ?`,
                 [user_id, category]
             );
             
             if (categoryRows.length === 0) {
                 // Проверка лимита
                 const [countResult] = await db.execute(
-                    `SELECT COUNT(*) as count FROM Category WHERE user_id = ?`,
+                    `SELECT COUNT(*) as count FROM category WHERE user_id = ?`,
                     [user_id]
                 );
                 const [userResult] = await db.execute(
@@ -219,7 +221,7 @@ const createOperation = async (req, res) => {
                 }
                 
                 const [categoryResult] = await db.execute(
-                    `INSERT INTO Category (user_id, name) VALUES (?, ?)`,
+                    `INSERT INTO category (user_id, name) VALUES (?, ?)`,
                     [user_id, category]
                 );
                 category_id = categoryResult.insertId;
@@ -257,7 +259,7 @@ const createOperation = async (req, res) => {
         console.log('📝 Insert data:', insertData);
 
         const [result] = await db.execute(
-            `INSERT INTO Operation (user_id, category_id, operation_type_id, description, amount, created_at, custom_category) 
+            `INSERT INTO operation (user_id, category_id, operation_type_id, description, amount, created_at, custom_category) 
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
             insertData
         );
@@ -274,9 +276,9 @@ const createOperation = async (req, res) => {
                 o.created_at,
                 COALESCE(c.name, o.custom_category) as category_name,
                 ot.name as operation_type_name
-            FROM Operation o
-            LEFT JOIN Category c ON o.category_id = c.id
-            LEFT JOIN OperationType ot ON o.operation_type_id = ot.id
+            FROM operation o
+            LEFT JOIN category c ON o.category_id = c.id
+            LEFT JOIN operationtype ot ON o.operation_type_id = ot.id
             WHERE o.id = ?`,
             [result.insertId]
         );
@@ -325,7 +327,7 @@ const updateOperation = async (req, res) => {
 
         // Проверяем, что операция принадлежит пользователю
         const [checkRows] = await db.execute(
-            `SELECT * FROM Operation WHERE id = ? AND user_id = ?`,
+            `SELECT * FROM operation WHERE id = ? AND user_id = ?`,
             [operationId, userId]
         );
 
@@ -343,14 +345,14 @@ const updateOperation = async (req, res) => {
         } else {
             // РАСХОДЫ: находим или создаем категорию
             const [categoryRows] = await db.execute(
-                `SELECT id FROM Category WHERE user_id = ? AND name = ?`,
+                `SELECT id FROM category WHERE user_id = ? AND name = ?`,
                 [userId, category]
             );
 
             if (categoryRows.length === 0) {
                 // Проверяем лимит категорий
                 const [countResult] = await db.execute(
-                    `SELECT COUNT(*) as count FROM Category WHERE user_id = ?`,
+                    `SELECT COUNT(*) as count FROM category WHERE user_id = ?`,
                     [userId]
                 );
                 
@@ -370,7 +372,7 @@ const updateOperation = async (req, res) => {
 
                 // Создаем новую категорию
                 const [categoryResult] = await db.execute(
-                    `INSERT INTO Category (user_id, name) VALUES (?, ?)`,
+                    `INSERT INTO category (user_id, name) VALUES (?, ?)`,
                     [userId, category]
                 );
                 category_id = categoryResult.insertId;
@@ -390,7 +392,7 @@ const updateOperation = async (req, res) => {
 
         // Обновляем операцию
         const [result] = await db.execute(
-            `UPDATE Operation 
+            `UPDATE operation 
              SET category_id = ?, 
                  operation_type_id = ?, 
                  description = ?, 
@@ -424,9 +426,9 @@ const updateOperation = async (req, res) => {
                 o.created_at,
                 COALESCE(c.name, o.custom_category) as category_name,
                 ot.name as operation_type_name
-            FROM Operation o
-            LEFT JOIN Category c ON o.category_id = c.id
-            LEFT JOIN OperationType ot ON o.operation_type_id = ot.id
+            FROM operation o
+            LEFT JOIN category c ON o.category_id = c.id
+            LEFT JOIN operationtype ot ON o.operation_type_id = ot.id
             WHERE o.id = ?`,
             [operationId]
         );
@@ -461,7 +463,7 @@ const deleteOperation = async (req, res) => {
 
         // Проверяем, что операция принадлежит пользователю
         const [checkRows] = await db.execute(
-            `SELECT * FROM Operation WHERE id = ? AND user_id = ?`,
+            `SELECT * FROM operation WHERE id = ? AND user_id = ?`,
             [operationId, userId]
         );
 
@@ -471,7 +473,7 @@ const deleteOperation = async (req, res) => {
 
         // Удаляем операцию
         const [result] = await db.execute(
-            `DELETE FROM Operation WHERE id = ? AND user_id = ?`,
+            `DELETE FROM operation WHERE id = ? AND user_id = ?`,
             [operationId, userId]
         );
 

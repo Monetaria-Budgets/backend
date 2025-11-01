@@ -46,7 +46,7 @@ const register = async (req, res) => {
 
         // Внесение данных в таблицу
         const [result] = await db.execute(
-            `INSERT INTO User ( login, name, password, email) VALUES (?, ?, ?, ?)`,
+            `INSERT INTO user ( login, name, password, email) VALUES (?, ?, ?, ?)`,
             [login, login, hashedPassword, email]
         );
 
@@ -103,15 +103,21 @@ const login = async (req, res) => {
             { expiresIn: '7d' }
         );
 
-        const [userData] = await db.execute(
-            `SELECT u.is_premium, r.name as role_name 
+        const [premiumData] = await db.execute(
+            `SELECT 
+                u.is_premium as had_premium_before,
+                EXISTS (
+                    SELECT 1 FROM premiumuser 
+                    WHERE user_id = u.id AND subscription_end > NOW()
+                ) as has_active_premium,
+                r.name as role_name
              FROM user u 
-             LEFT JOIN Role r ON u.role_id = r.id 
+             LEFT JOIN role r ON u.role_id = r.id 
              WHERE u.id = ?`,
             [user.id]
         );
 
-        const userInfo = userData[0];
+        const userInfo = premiumData[0];
 
         return res.status(200).json({
             message: 'Успешная авторизация',
@@ -122,10 +128,10 @@ const login = async (req, res) => {
                 name: user.name,
                 email: user.email,
                 role: userInfo.role_name,
-                premium: userInfo.is_premium
+                premium: userInfo.has_active_premium // Текущий активный статус
             }
         });
-        
+                    
     } catch (err) {
         console.error('Authorization error:', err);
         return res.status(500).json({ error: 'Internal server error' });

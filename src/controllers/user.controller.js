@@ -40,9 +40,9 @@ const getUserById = async (req, res) => {
         r.name as role, 
         cs.name as color_scheme
       FROM user u
-      LEFT JOIN Role r ON u.role_id = r.id
-      LEFT JOIN ColorScheme cs ON u.ColorScheme_id = cs.id  
-      LEFT JOIN Currency c ON u.currency_id = c.id 
+      LEFT JOIN role r ON u.role_id = r.id
+      LEFT JOIN colorscheme cs ON u.ColorScheme_id = cs.id  
+      LEFT JOIN currency c ON u.currency_id = c.id 
       WHERE u.id = ?`,
       [userId]
     );
@@ -123,7 +123,7 @@ const updateUserProfile  = async (req, res) => {
 
     values.push(userId);
 
-    const query = `UPDATE User SET ${fields.join(', ')} WHERE id = ?`;
+    const query = `UPDATE user SET ${fields.join(', ')} WHERE id = ?`;
 
     const [result] = await db.execute(query, values);
 
@@ -192,8 +192,8 @@ const getUserHimself = async (req, res) => {
         c.name as currency_name
       FROM user u
       LEFT JOIN role r ON u.role_id = r.id
-      LEFT JOIN ColorScheme cs ON u.ColorScheme_id = cs.id
-      LEFT JOIN Currency c ON u.currency_id = c.id
+      LEFT JOIN colorscheme cs ON u.ColorScheme_id = cs.id
+      LEFT JOIN currency c ON u.currency_id = c.id
       WHERE u.id = ?`,
       [userId]
     );

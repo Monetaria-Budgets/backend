@@ -211,8 +211,8 @@ const getBasicStatistics = async (userId, period) => {
       COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS total_expense,
       COALESCE(SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END), 0) - 
       COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS net_flow
-    FROM Operation o
-    JOIN OperationType ot ON o.operation_type_id = ot.id
+    FROM operation o
+    JOIN operationtype ot ON o.operation_type_id = ot.id
     WHERE o.user_id = ?
       AND (${dateCondition})
   `;
@@ -222,8 +222,8 @@ const getBasicStatistics = async (userId, period) => {
       ${dateSelectClause},
       SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END) AS income,
       SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END) AS expense
-    FROM Operation o
-    JOIN OperationType ot ON o.operation_type_id = ot.id
+    FROM operation o
+    JOIN operationtype ot ON o.operation_type_id = ot.id
     WHERE o.user_id = ?
       AND (${dateCondition})
     GROUP BY ${groupByClause}
@@ -302,9 +302,9 @@ const getCategoryStats = async (userId, period) => {
       ot.name as type,
       SUM(o.amount) as amount,
       COUNT(o.id) as transaction_count
-    FROM Operation o
-    JOIN Category c ON o.category_id = c.id
-    JOIN OperationType ot ON o.operation_type_id = ot.id
+    FROM operation o
+    JOIN category c ON o.category_id = c.id
+    JOIN operationtype ot ON o.operation_type_id = ot.id
     WHERE o.user_id = ?
       AND (${dateCondition})
     GROUP BY c.name, c.color, ot.name
@@ -358,9 +358,9 @@ const getAllTransactionsForPeriod = async (userId, period) => {
       o.created_at,
       c.name as category,
       ot.name as operation_type
-    FROM Operation o
-    JOIN Category c ON o.category_id = c.id
-    JOIN OperationType ot ON o.operation_type_id = ot.id
+    FROM operation o
+    JOIN category c ON o.category_id = c.id
+    JOIN operationtype ot ON o.operation_type_id = ot.id
     WHERE o.user_id = ?
       AND (${dateCondition})
     ORDER BY o.created_at DESC
@@ -430,9 +430,9 @@ const getAdditionalMetrics = async (userId, period) => {
       COUNT(DISTINCT c.name) as unique_categories,
       COUNT(DISTINCT CASE WHEN ot.name = 'Доход' THEN c.name END) as unique_income_categories,
       COUNT(DISTINCT CASE WHEN ot.name = 'Расход' THEN c.name END) as unique_expense_categories
-    FROM Operation o
-    JOIN OperationType ot ON o.operation_type_id = ot.id
-    JOIN Category c ON o.category_id = c.id
+    FROM operation o
+    JOIN operationtype ot ON o.operation_type_id = ot.id
+    JOIN category c ON o.category_id = c.id
     WHERE o.user_id = ?
       AND (${dateCondition})
   `;
@@ -591,9 +591,9 @@ const getCategoryStatsCustom = async (userId, startDate, endDate) => {
       ot.name as type,
       SUM(o.amount) as amount,
       COUNT(o.id) as transaction_count
-    FROM Operation o
-    JOIN Category c ON o.category_id = c.id
-    JOIN OperationType ot ON o.operation_type_id = ot.id
+    FROM operation o
+    JOIN category c ON o.category_id = c.id
+    JOIN operationtype ot ON o.operation_type_id = ot.id
     WHERE o.user_id = ?
       AND o.created_at >= ? AND o.created_at <= ?
     GROUP BY c.name, c.color, ot.name
@@ -613,9 +613,9 @@ const getAllTransactionsCustom = async (userId, startDate, endDate) => {
       o.created_at,
       c.name as category,
       ot.name as operation_type
-    FROM Operation o
-    JOIN Category c ON o.category_id = c.id
-    JOIN OperationType ot ON o.operation_type_id = ot.id
+    FROM operation o
+    JOIN category c ON o.category_id = c.id
+    JOIN operationtype ot ON o.operation_type_id = ot.id
     WHERE o.user_id = ?
       AND o.created_at >= ? AND o.created_at <= ?
     ORDER BY o.created_at DESC
@@ -651,9 +651,9 @@ const getAdditionalMetricsCustom = async (userId, startDate, endDate) => {
       COUNT(DISTINCT c.name) as unique_categories,
       COUNT(DISTINCT CASE WHEN ot.name = 'Доход' THEN c.name END) as unique_income_categories,
       COUNT(DISTINCT CASE WHEN ot.name = 'Расход' THEN c.name END) as unique_expense_categories
-    FROM Operation o
-    JOIN OperationType ot ON o.operation_type_id = ot.id
-    JOIN Category c ON o.category_id = c.id
+    FROM operation o
+    JOIN operationtype ot ON o.operation_type_id = ot.id
+    JOIN category c ON o.category_id = c.id
     WHERE o.user_id = ?
       AND o.created_at >= ? AND o.created_at <= ?
   `;
@@ -775,8 +775,8 @@ const getBasicStatisticsCustom = async (userId, startDate, endDate) => {
       COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS total_expense,
       COALESCE(SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END), 0) - 
       COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS net_flow
-    FROM Operation o
-    JOIN OperationType ot ON o.operation_type_id = ot.id
+    FROM operation o
+    JOIN operationtype ot ON o.operation_type_id = ot.id
     WHERE o.user_id = ?
       AND o.created_at >= ? AND o.created_at <= ?
   `;
@@ -786,8 +786,8 @@ const getBasicStatisticsCustom = async (userId, startDate, endDate) => {
       DATE(o.created_at) AS date,
       SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END) AS income,
       SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END) AS expense
-    FROM Operation o
-    JOIN OperationType ot ON o.operation_type_id = ot.id
+    FROM operation o
+    JOIN operationtype ot ON o.operation_type_id = ot.id
     WHERE o.user_id = ?
       AND o.created_at >= ? AND o.created_at <= ?
     GROUP BY DATE(o.created_at)
@@ -1034,8 +1034,8 @@ const getLifetimeStatistics = async (req, res) => {
         MAX(o.created_at) as last_transaction,
         COUNT(DISTINCT DATE(o.created_at)) as total_active_days,
         DATEDIFF(MAX(o.created_at), MIN(o.created_at)) as tracking_period_days
-      FROM Operation o
-      JOIN OperationType ot ON o.operation_type_id = ot.id
+      FROM operation o
+      JOIN operationtype ot ON o.operation_type_id = ot.id
       WHERE o.user_id = ?
     `;
 
@@ -1059,9 +1059,9 @@ const getLifetimeStatistics = async (req, res) => {
         COUNT(o.id) as count,
         SUM(o.amount) as total_amount,
         ot.name as type
-      FROM Operation o
-      JOIN Category c ON o.category_id = c.id
-      JOIN OperationType ot ON o.operation_type_id = ot.id
+      FROM operation o
+      JOIN category c ON o.category_id = c.id
+      JOIN operationtype ot ON o.operation_type_id = ot.id
       WHERE o.user_id = ?
       GROUP BY c.name, c.color, ot.name
       ORDER BY COUNT(o.id) DESC
@@ -1077,8 +1077,8 @@ const getLifetimeStatistics = async (req, res) => {
         SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END) as income,
         SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END) as expense,
         COUNT(o.id) as transactions
-      FROM Operation o
-      JOIN OperationType ot ON o.operation_type_id = ot.id
+      FROM operation o
+      JOIN operationtype ot ON o.operation_type_id = ot.id
       WHERE o.user_id = ?
       GROUP BY DATE_FORMAT(o.created_at, '%Y-%m')
       ORDER BY (SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END) - SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END)) DESC

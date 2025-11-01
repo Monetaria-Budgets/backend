@@ -1,4 +1,4 @@
-// controllers/category.controller.js
+// controllers/category.controller.js - ПОЛНАЯ ВЕРСИЯ
 const db = require('../db/db');
 
 // Получить все категории пользователя
@@ -290,11 +290,39 @@ const deleteCategory = async (req, res) => {
   }
 };
 
+// Получить операции категории
+const getCategoryOperations = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const categoryId = req.params.id;
+
+    console.log('📋 Получение операций категории:', { categoryId, userId });
+
+    const operationsQuery = `
+      SELECT o.id, o.amount, o.description, o.created_at
+      FROM operation o
+      WHERE o.category_id = ? AND o.user_id = ?
+      ORDER BY o.created_at DESC
+    `;
+
+    const [operations] = await db.execute(operationsQuery, [categoryId, userId]);
+    
+    console.log('✅ Найдено операций:', operations.length);
+
+    return res.status(200).json(operations);
+
+  } catch (err) {
+    console.error('❌ Ошибка при получении операций категории:', err);
+    return res.status(500).json({ error: 'Ошибка сервера при получении операций категории' });
+  }
+};
+
 module.exports = {
   getCategories,
   getCategoriesByUserId,
   checkCategoryLimit,
   createCategory,
   updateCategory,
-  deleteCategory
+  deleteCategory,
+  getCategoryOperations
 };

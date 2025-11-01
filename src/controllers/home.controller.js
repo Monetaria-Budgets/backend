@@ -9,8 +9,8 @@ const getHomeData = (req, res) => {
         SELECT 
             COALESCE(SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END), 0) - 
             COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS balance
-        FROM Operation o
-        JOIN OperationType ot ON o.operation_type_id = ot.id
+        FROM operation o
+        JOIN operationtype ot ON o.operation_type_id = ot.id
         WHERE o.user_id = ?
     `;
 
@@ -18,9 +18,9 @@ const getHomeData = (req, res) => {
     const topCategoriesQuery = `
         SELECT 
             c.name AS category_name
-        FROM Operation o
-        JOIN Category c ON o.category_id = c.id
-        JOIN OperationType ot ON o.operation_type_id = ot.id
+        FROM operation o
+        JOIN category c ON o.category_id = c.id
+        JOIN operationTte ot ON o.operation_type_id = ot.id
         WHERE o.user_id = ?
           AND ot.name = 'Расход'
         GROUP BY c.id, c.name
@@ -36,9 +36,9 @@ const getHomeData = (req, res) => {
             o.created_at,
             c.name AS category_name,
             ot.name AS operation_type
-        FROM Operation o
-        JOIN Category c ON o.category_id = c.id
-        JOIN OperationType ot ON o.operation_type_id = ot.id
+        FROM operation o
+        JOIN category c ON o.category_id = c.id
+        JOIN operationtype ot ON o.operation_type_id = ot.id
         WHERE o.user_id = ?
         ORDER BY o.created_at DESC
     `;
