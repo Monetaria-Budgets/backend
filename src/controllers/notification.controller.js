@@ -53,6 +53,32 @@ const getUserNotifications = async (req, res) => {
   }
 };
 
+// Удалить все уведомления пользователя
+const deleteAllNotifications = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const [result] = await db.execute(
+      'DELETE FROM notification WHERE user_id = ? AND source = "push"',
+      [userId]
+    );
+
+    console.log(`🗑️ Удалены все уведомления пользователя ${userId}: ${result.affectedRows} шт.`);
+
+    return res.status(200).json({
+      success: true,
+      message: `Все уведомления удалены (${result.affectedRows} шт.)`,
+      deletedCount: result.affectedRows
+    });
+  } catch (error) {
+    console.error('Delete all notifications error:', error);
+    return res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+};
+
 // Получить непрочитанные уведомления
 const getUnreadNotifications = async (req, res) => {
   try {
@@ -204,8 +230,6 @@ const getUnreadCount = async (req, res) => {
        AND (scheduled_at IS NULL OR scheduled_at <= NOW())`,  // ← ДОБАВЛЕНО
       [userId]
     );
-
-    console.log(`🔔 Непрочитанных уведомлений для пользователя ${userId}: ${result[0].count}`);
 
     return res.status(200).json({
       success: true,
@@ -481,4 +505,5 @@ module.exports = {
   createScheduledNotification,
   sendNotificationToUser,
   getFutureNotifications, 
+  deleteAllNotifications
 };

@@ -12,7 +12,8 @@ const {
   testConnection,
   createScheduledNotification,
   sendNotificationToUser,
-  getFutureNotifications, // ← ДОБАВЛЕНО
+  getFutureNotifications,
+  deleteAllNotifications, // ← ДОБАВЛЕНО
 } = require('../controllers/notification.controller');
 
 // Тест подключения
@@ -38,6 +39,9 @@ router.patch('/mark-all-read', auth, markAllAsRead);
 
 // Удалить уведомление
 router.delete('/:notificationId', auth, deleteNotification);
+
+// Удалить все уведомления
+router.delete('/', auth, deleteAllNotifications);
 
 // Тестовое уведомление (текущему пользователю)
 router.post('/test', auth, sendTestNotification);

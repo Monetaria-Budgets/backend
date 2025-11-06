@@ -1,6 +1,8 @@
 const express = require('express');
 const dotenv = require('dotenv');
 const db = require('./db/db');
+const cors = require('cors');
+
 dotenv.config();
 
 const app = express();
@@ -24,6 +26,15 @@ const currencyCron = require('./cron/currency.cron');
 
 
 currencyCron.init();
+
+app.use(cors({
+  origin: true, 
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
+app.use(express.json());
 
 // Маршруты
 app.get('/', (req, res) => {
