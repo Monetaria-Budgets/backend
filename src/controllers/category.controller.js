@@ -1,4 +1,3 @@
-// controllers/category.controller.js - ПОЛНАЯ ВЕРСИЯ
 const db = require('../db/db');
 
 // Получить все категории пользователя
@@ -20,18 +19,18 @@ const getCategories = async (req, res) => {
           FROM operation o 
           WHERE o.category_id = c.id 
             AND o.user_id = c.user_id
-            AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
-            AND YEAR(o.created_at) = YEAR(CURRENT_DATE())
+            AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
+            AND EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
         ), 0) as current_month_spent
       FROM category c 
-      WHERE c.user_id = ? 
+      WHERE c.user_id = $1 
       ORDER BY c.created_at DESC
     `;
 
-    const [categories] = await db.execute(categoriesQuery, [userId]);
-    console.log('✅ Найдено категорий:', categories.length);
+    const categories = await db.query(categoriesQuery, [userId]);
+    console.log('✅ Найдено категорий:', categories.rows.length);
 
-    return res.status(200).json(categories);
+    return res.status(200).json(categories.rows);
 
   } catch (err) {
     console.error('❌ Ошибка при получении категорий:', err);
@@ -57,17 +56,17 @@ const getCategoriesByUserId = async (req, res) => {
           FROM operation o 
           WHERE o.category_id = c.id 
             AND o.user_id = c.user_id
-            AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
-            AND YEAR(o.created_at) = YEAR(CURRENT_DATE())
+            AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
+            AND EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
         ), 0) as current_month_spent
       FROM category c 
-      WHERE c.user_id = ? 
+      WHERE c.user_id = $1 
       ORDER BY c.created_at DESC
     `;
 
-    const [categories] = await db.execute(categoriesQuery, [userId]);
+    const categories = await db.query(categoriesQuery, [userId]);
     
-    return res.status(200).json(categories);
+    return res.status(200).json(categories.rows);
 
   } catch (err) {
     console.error('Ошибка при получении категорий пользователя:', err);
@@ -84,17 +83,17 @@ const checkCategoryLimit = async (req, res) => {
     // Проверяем премиум статус через таблицу premiumuser
     const premiumQuery = `
       SELECT * FROM premiumuser 
-      WHERE user_id = ? AND subscription_end > NOW()
+      WHERE user_id = $1 AND subscription_end > CURRENT_TIMESTAMP
     `;
-    const [premiumResult] = await db.execute(premiumQuery, [userId]);
+    const premiumResult = await db.query(premiumQuery, [userId]);
     
-    const isPremium = premiumResult.length > 0;
+    const isPremium = premiumResult.rows.length > 0;
     console.log('👤 Премиум статус для категорий:', isPremium);
 
     // Считаем текущее количество категорий
-    const countQuery = `SELECT COUNT(*) as count FROM category WHERE user_id = ?`;
-    const [countResult] = await db.execute(countQuery, [userId]);
-    const current = countResult[0].count;
+    const countQuery = `SELECT COUNT(*) as count FROM category WHERE user_id = $1`;
+    const countResult = await db.query(countQuery, [userId]);
+    const current = parseInt(countResult.rows[0].count);
 
     const limit = isPremium ? 999 : 6;
 
@@ -131,14 +130,14 @@ const createCategory = async (req, res) => {
     // Проверяем лимит
     const premiumQuery = `
       SELECT * FROM premiumuser 
-      WHERE user_id = ? AND subscription_end > NOW()
+      WHERE user_id = $1 AND subscription_end > CURRENT_TIMESTAMP
     `;
-    const [premiumResult] = await db.execute(premiumQuery, [userId]);
-    const isPremium = premiumResult.length > 0;
+    const premiumResult = await db.query(premiumQuery, [userId]);
+    const isPremium = premiumResult.rows.length > 0;
 
-    const countQuery = `SELECT COUNT(*) as count FROM category WHERE user_id = ?`;
-    const [countResult] = await db.execute(countQuery, [userId]);
-    const currentCount = countResult[0].count;
+    const countQuery = `SELECT COUNT(*) as count FROM category WHERE user_id = $1`;
+    const countResult = await db.query(countQuery, [userId]);
+    const currentCount = parseInt(countResult.rows[0].count);
 
     if (!isPremium && currentCount >= 6) {
       return res.status(403).json({ 
@@ -148,16 +147,17 @@ const createCategory = async (req, res) => {
 
     const insertQuery = `
       INSERT INTO category (name, color, user_id, created_at)
-      VALUES (?, ?, ?, NOW())
+      VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+      RETURNING id
     `;
 
-    const [result] = await db.execute(insertQuery, [
+    const result = await db.query(insertQuery, [
       name.trim(), 
       color || '#4ECDC4',
       userId
     ]);
 
-    console.log('✅ Категория создана с ID:', result.insertId);
+    console.log('✅ Категория создана с ID:', result.rows[0].id);
 
     // Получаем созданную категорию
     const categoryQuery = `
@@ -170,12 +170,12 @@ const createCategory = async (req, res) => {
         'expense' as type,
         0 as current_month_spent
       FROM category 
-      WHERE id = ?
+      WHERE id = $1
     `;
     
-    const [categoryResult] = await db.execute(categoryQuery, [result.insertId]);
+    const categoryResult = await db.query(categoryQuery, [result.rows[0].id]);
 
-    return res.status(201).json(categoryResult[0]);
+    return res.status(201).json(categoryResult.rows[0]);
 
   } catch (err) {
     console.error('❌ Ошибка при создании категории:', err);
@@ -193,10 +193,10 @@ const updateCategory = async (req, res) => {
     console.log('✏️ Обновление категории:', { categoryId, name, color, userId });
 
     // Проверяем, что категория принадлежит пользователю
-    const checkQuery = `SELECT * FROM category WHERE id = ? AND user_id = ?`;
-    const [checkResult] = await db.execute(checkQuery, [categoryId, userId]);
+    const checkQuery = `SELECT * FROM category WHERE id = $1 AND user_id = $2`;
+    const checkResult = await db.query(checkQuery, [categoryId, userId]);
 
-    if (checkResult.length === 0) {
+    if (checkResult.rows.length === 0) {
       return res.status(404).json({ error: 'Категория не найдена' });
     }
 
@@ -207,12 +207,12 @@ const updateCategory = async (req, res) => {
     const updateQuery = `
       UPDATE category 
       SET 
-        name = COALESCE(?, name), 
-        color = COALESCE(?, color)
-      WHERE id = ? AND user_id = ?
+        name = COALESCE($1, name), 
+        color = COALESCE($2, color)
+      WHERE id = $3 AND user_id = $4
     `;
 
-    await db.execute(updateQuery, [
+    await db.query(updateQuery, [
       name ? name.trim() : null, 
       color || null,
       categoryId, 
@@ -235,15 +235,15 @@ const updateCategory = async (req, res) => {
           FROM operation o 
           WHERE o.category_id = c.id 
             AND o.user_id = c.user_id
-            AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
-            AND YEAR(o.created_at) = YEAR(CURRENT_DATE())
+            AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
+            AND EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
         ), 0) as current_month_spent
       FROM category c 
-      WHERE id = ?
+      WHERE id = $1
     `;
-    const [categoryResult] = await db.execute(categoryQuery, [categoryId]);
+    const categoryResult = await db.query(categoryQuery, [categoryId]);
 
-    return res.status(200).json(categoryResult[0]);
+    return res.status(200).json(categoryResult.rows[0]);
 
   } catch (err) {
     console.error('❌ Ошибка при обновлении категории:', err);
@@ -260,25 +260,25 @@ const deleteCategory = async (req, res) => {
     console.log('🗑️ Удаление категории:', { categoryId, userId });
 
     // Проверяем, что категория принадлежит пользователю
-    const checkQuery = `SELECT * FROM category WHERE id = ? AND user_id = ?`;
-    const [checkResult] = await db.execute(checkQuery, [categoryId, userId]);
+    const checkQuery = `SELECT * FROM category WHERE id = $1 AND user_id = $2`;
+    const checkResult = await db.query(checkQuery, [categoryId, userId]);
 
-    if (checkResult.length === 0) {
+    if (checkResult.rows.length === 0) {
       return res.status(404).json({ error: 'Категория не найдена' });
     }
 
     // Проверяем, нет ли операций с этой категорией
-    const operationsQuery = `SELECT COUNT(*) as count FROM operation WHERE category_id = ?`;
-    const [operationsResult] = await db.execute(operationsQuery, [categoryId]);
+    const operationsQuery = `SELECT COUNT(*) as count FROM operation WHERE category_id = $1`;
+    const operationsResult = await db.query(operationsQuery, [categoryId]);
 
-    if (operationsResult[0].count > 0) {
+    if (parseInt(operationsResult.rows[0].count) > 0) {
       return res.status(400).json({ 
         error: 'Нельзя удалить категорию, так как с ней связаны операции. Сначала удалите или переместите операции.' 
       });
     }
 
-    const deleteQuery = `DELETE FROM category WHERE id = ? AND user_id = ?`;
-    await db.execute(deleteQuery, [categoryId, userId]);
+    const deleteQuery = `DELETE FROM category WHERE id = $1 AND user_id = $2`;
+    await db.query(deleteQuery, [categoryId, userId]);
 
     console.log('✅ Категория удалена');
 
@@ -301,15 +301,15 @@ const getCategoryOperations = async (req, res) => {
     const operationsQuery = `
       SELECT o.id, o.amount, o.description, o.created_at
       FROM operation o
-      WHERE o.category_id = ? AND o.user_id = ?
+      WHERE o.category_id = $1 AND o.user_id = $2
       ORDER BY o.created_at DESC
     `;
 
-    const [operations] = await db.execute(operationsQuery, [categoryId, userId]);
+    const operations = await db.query(operationsQuery, [categoryId, userId]);
     
-    console.log('✅ Найдено операций:', operations.length);
+    console.log('✅ Найдено операций:', operations.rows.length);
 
-    return res.status(200).json(operations);
+    return res.status(200).json(operations.rows);
 
   } catch (err) {
     console.error('❌ Ошибка при получении операций категории:', err);

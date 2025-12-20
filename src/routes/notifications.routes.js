@@ -13,7 +13,7 @@ const {
   createScheduledNotification,
   sendNotificationToUser,
   getFutureNotifications,
-  deleteAllNotifications, // ← ДОБАВЛЕНО
+  deleteAllNotifications, 
 } = require('../controllers/notification.controller');
 
 // Тест подключения
@@ -29,7 +29,7 @@ router.get('/unread', auth, getUnreadNotifications);
 router.get('/unread-count', auth, getUnreadCount);
 
 // Получить будущие уведомления
-router.get('/future', auth, getFutureNotifications); // ← ДОБАВЛЕНО
+router.get('/future', auth, getFutureNotifications); 
 
 // Пометить уведомление как прочитанное
 router.patch('/:notificationId/read', auth, markAsRead);

@@ -26,43 +26,34 @@ const register = async (req, res) => {
         // Хэширование пароля
         const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
 
-        // Проверка уникальности почты и логина
-        const [existingRowsForLogin] = await db.execute(
-            'SELECT id FROM user WHERE login = ?',
-            [login]
-        );
-
-        const [existingRowsForEmail] = await db.execute(
-            'SELECT id FROM user WHERE email = ?',
-            [email]
-        );
-
-        if (existingRowsForEmail.length > 0) {
-            return res.status(409).json({ error: 'Почта уже используется!' });
-        }
-        if (existingRowsForLogin.length > 0) {
-            return res.status(409).json({ error: 'Логин уже используется!' });
-        }
-
         // Внесение данных в таблицу
-        const [result] = await db.execute(
-            `INSERT INTO user ( login, name, password, email) VALUES (?, ?, ?, ?)`,
+        const result = await db.query(
+            `INSERT INTO "user" (login, name, password, email) VALUES ($1, $2, $3, $4) RETURNING id`,
             [login, login, hashedPassword, email]
         );
 
         // Вывод результата
         return res.status(201).json({
-            id: result.insertId,
+            id: result.rows[0].id,
             email,
             login,
         });
 
     }   catch (err) {
-        if (err) {
-            return res.status(400).json({ error: 'Логин или email уже заняты' })
-        }
         console.error('Registration error:', err);
-        return res.status(500).json({ error: 'Internal server error' });
+        if (err.code === '23505') {
+            
+            if (err.constraint === 'user_login_key') {
+                return res.status(409).json({ error: 'Логин уже используется!' });
+            }
+            if (err.constraint === 'user_email_key') {
+                return res.status(409).json({ error: 'Почта уже используется!' });
+            }
+            if (err.constraint === 'user_pkey') {
+                return res.status(500).json({ error: 'Ошибка сервера: конфликт ID. Обратитесь к администратору.' });
+            }
+        }
+        return res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 };
 
@@ -81,16 +72,16 @@ const login = async (req, res) => {
 
         const { login, password } = req.body;
 
-        const [rows] = await db.execute(
-            'SELECT * FROM user WHERE login = ?', 
+        const rows = await db.query(
+            'SELECT * FROM "user" WHERE login = $1', 
             [login]
         );
 
-        if (rows.length == 0) {
+        if (rows.rows.length == 0) {
             return res.status(401).json({ error: 'Неверный логин или пароль!' });
         }
 
-        const user = rows[0];
+        const user = rows.rows[0];
 
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
@@ -103,21 +94,21 @@ const login = async (req, res) => {
             { expiresIn: '7d' }
         );
 
-        const [premiumData] = await db.execute(
+        const premiumData = await db.query(
             `SELECT 
                 u.is_premium as had_premium_before,
                 EXISTS (
                     SELECT 1 FROM premiumuser 
-                    WHERE user_id = u.id AND subscription_end > NOW()
+                    WHERE user_id = u.id AND subscription_end > CURRENT_TIMESTAMP
                 ) as has_active_premium,
                 r.name as role_name
-             FROM user u 
+             FROM "user" u 
              LEFT JOIN role r ON u.role_id = r.id 
-             WHERE u.id = ?`,
+             WHERE u.id = $1`,
             [user.id]
         );
 
-        const userInfo = premiumData[0];
+        const userInfo = premiumData.rows[0];
 
         return res.status(200).json({
             message: 'Успешная авторизация',
@@ -146,8 +137,8 @@ const logout = async (req, res) => {
             return res.status(400).json({ error: 'Токен не предоставлен' });
         }
 
-        await db.execute(
-            'INSERT INTO blacklisted_tokens (token, expires_at) VALUES (?, DATE_ADD(NOW(), INTERVAL 7 DAY))',
+        await db.query(
+            'INSERT INTO blacklisted_tokens (token, expires_at) VALUES ($1, CURRENT_TIMESTAMP + INTERVAL \'7 days\')',
             [token]
         );
 

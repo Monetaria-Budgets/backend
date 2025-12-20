@@ -1,4 +1,3 @@
-// routes/operations.routes.js
 const express = require('express');
 const router = express.Router();
 const { 
@@ -7,7 +6,7 @@ const {
     getOperationsByUserId,
     createOperation,
     updateOperation,
-    deleteOperation // 🔥 Добавляем новый контроллер
+    deleteOperation
 } = require('../controllers/operation.controller');
 const auth = require('../middleware/auth');
 
@@ -20,7 +19,7 @@ router.get('/', getAllOperations);
 // PUT /operations/:id → обновить операцию
 router.put('/:id', auth, updateOperation);
 
-// DELETE /operations/:id → удалить операцию (🔥 НОВЫЙ РОУТ)
+// DELETE /operations/:id → удалить операцию 
 router.delete('/:id', auth, deleteOperation);
 
 // GET /operations/:id → получить операцию по ID

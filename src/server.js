@@ -21,9 +21,7 @@ const spendingLimitsRoutes = require('./routes/spendingLimits.routes');
 const currencyController = require('./controllers/currency.controller');
 const premiumRoutes = require('./routes/premium.routes');
 
-
 const currencyCron = require('./cron/currency.cron');
-
 
 currencyCron.init();
 
@@ -71,7 +69,14 @@ setTimeout(async () => {
       json: (data) => console.log('✅ Курсы обновлены при старте:', data),
       status: (code) => ({ json: (err) => console.error(`❌ Ошибка ${code}:`, err) })
     };
-    await currencyController.updateRates({}, mockRes);
+    
+    // Используем правильный метод контроллера
+    const { updateRates } = currencyController;
+    if (typeof updateRates === 'function') {
+      await updateRates({}, mockRes);
+    } else {
+      console.error('❌ updateRates не найден в currencyController');
+    }
   } catch (error) {
     console.error('❌ Ошибка при обновлении курсов при старте:', error);
   }
@@ -80,27 +85,38 @@ setTimeout(async () => {
 // Удаление истёкших подписок
 const updateExpiredPremiums = async () => {
     const query = `
-        UPDATE user 
-        SET is_premium = FALSE 
+        UPDATE "user" 
+        SET is_premium = false 
         WHERE id IN (
             SELECT user_id 
             FROM premiumuser 
-            WHERE subscription_end <= NOW()
+            WHERE subscription_end <= CURRENT_TIMESTAMP
         )
-        AND is_premium = TRUE;
+        AND is_premium = true
+        RETURNING id;
     `;
 
     try {
-        const [result] = await db.execute(query);
-        if (result.affectedRows > 0) {
-            console.log(`✅ ${result.affectedRows} пользователей потеряли премиум.`);
+        const result = await db.query(query);
+        if (result.rowCount > 0) {
+            console.log(`✅ ${result.rowCount} пользователей потеряли премиум.`);
+            console.log('📋 ID пользователей:', result.rows.map(row => row.id));
         } else {
-            console.log('Нет истекших премиум-подписок');
+            console.log('📭 Нет истекших премиум-подписок');
         }
     } catch (err) {
         console.error('❌ Ошибка при обновлении истёкших подписок:', err.message);
+        console.error('🔴 Детали ошибки:', err);
     }
 };
 
-setInterval(updateExpiredPremiums, 24 * 60 * 60 * 1000);
+
+
+// Запускаем по интервалу
+const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 часа
+setInterval(updateExpiredPremiums, UPDATE_INTERVAL_MS);
+
+// Запускаем сразу при старте
 updateExpiredPremiums();
+
+

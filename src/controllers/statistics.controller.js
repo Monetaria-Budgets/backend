@@ -1,4 +1,3 @@
-// controllers/statistics.controller.js
 const db = require('../db/db');
 
 // Вспомогательная функция для обработки категорий
@@ -178,28 +177,28 @@ const getBasicStatistics = async (userId, period) => {
   switch (period) {
     case 'week':
       dateCondition = `
-        o.created_at >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
-        AND o.created_at < DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 7 DAY)
+        o.created_at >= DATE_TRUNC('week', CURRENT_DATE)
+        AND o.created_at < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'
       `;
       break;
     case 'month':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND MONTH(o.created_at) = MONTH(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
       `;
       break;
     case 'quarter':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND QUARTER(o.created_at) = QUARTER(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(QUARTER FROM o.created_at) = EXTRACT(QUARTER FROM CURRENT_DATE)
       `;
       break;
     case 'year':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
       `;
-      groupByClause = 'MONTH(o.created_at)';
-      dateSelectClause = 'DATE(CONCAT(YEAR(MIN(o.created_at)), "-", MONTH(MIN(o.created_at)), "-01")) AS date';
+      groupByClause = 'EXTRACT(MONTH FROM o.created_at)';
+      dateSelectClause = 'DATE(DATE_TRUNC(\'month\', MIN(o.created_at))) AS date';
       break;
     default:
       throw new Error('Неверный период');
@@ -213,7 +212,7 @@ const getBasicStatistics = async (userId, period) => {
       COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS net_flow
     FROM operation o
     JOIN operationtype ot ON o.operation_type_id = ot.id
-    WHERE o.user_id = ?
+    WHERE o.user_id = $1
       AND (${dateCondition})
   `;
 
@@ -224,19 +223,19 @@ const getBasicStatistics = async (userId, period) => {
       SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END) AS expense
     FROM operation o
     JOIN operationtype ot ON o.operation_type_id = ot.id
-    WHERE o.user_id = ?
+    WHERE o.user_id = $1
       AND (${dateCondition})
     GROUP BY ${groupByClause}
     ORDER BY MIN(DATE(o.created_at)) ASC
   `;
 
   const [summaryResult, dynamicsResult] = await Promise.all([
-    db.execute(summaryQuery, [userId]),
-    db.execute(dynamicsQuery, [userId])
+    db.query(summaryQuery, [userId]),
+    db.query(dynamicsQuery, [userId])
   ]);
 
-  const summaryData = summaryResult[0][0] || { total_income: 0, total_expense: 0, net_flow: 0 };
-  const dynamicsData = dynamicsResult[0];
+  const summaryData = summaryResult.rows[0] || { total_income: 0, total_expense: 0, net_flow: 0 };
+  const dynamicsData = dynamicsResult.rows;
 
   // Строим кумулятивный баланс для графика
   let cumulativeBalance = 0;
@@ -252,9 +251,9 @@ const getBasicStatistics = async (userId, period) => {
 
   return {
     summary: {
-      netFlow: summaryData.net_flow,
-      income: summaryData.total_income,
-      expense: summaryData.total_expense
+      netFlow: parseFloat(summaryData.net_flow),
+      income: parseFloat(summaryData.total_income),
+      expense: parseFloat(summaryData.total_expense)
     },
     dynamics: chartData
   };
@@ -267,31 +266,31 @@ const getCategoryStats = async (userId, period) => {
   switch (period) {
     case 'week':
       dateCondition = `
-        o.created_at >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
-        AND o.created_at < DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 7 DAY)
+        o.created_at >= DATE_TRUNC('week', CURRENT_DATE)
+        AND o.created_at < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'
       `;
       break;
     case 'month':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND MONTH(o.created_at) = MONTH(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
       `;
       break;
     case 'quarter':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND QUARTER(o.created_at) = QUARTER(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(QUARTER FROM o.created_at) = EXTRACT(QUARTER FROM CURRENT_DATE)
       `;
       break;
     case 'year':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
       `;
       break;
     default:
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND MONTH(o.created_at) = MONTH(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
       `;
   }
 
@@ -305,14 +304,14 @@ const getCategoryStats = async (userId, period) => {
     FROM operation o
     JOIN category c ON o.category_id = c.id
     JOIN operationtype ot ON o.operation_type_id = ot.id
-    WHERE o.user_id = ?
+    WHERE o.user_id = $1
       AND (${dateCondition})
     GROUP BY c.name, c.color, ot.name
     ORDER BY ot.name, SUM(o.amount) DESC
   `;
 
-  const [categoriesResult] = await db.execute(categoriesQuery, [userId]);
-  return processCategories(categoriesResult);
+  const categoriesResult = await db.query(categoriesQuery, [userId]);
+  return processCategories(categoriesResult.rows);
 };
 
 // Получить ВСЕ транзакции за период
@@ -322,31 +321,31 @@ const getAllTransactionsForPeriod = async (userId, period) => {
   switch (period) {
     case 'week':
       dateCondition = `
-        o.created_at >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
-        AND o.created_at < DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 7 DAY)
+        o.created_at >= DATE_TRUNC('week', CURRENT_DATE)
+        AND o.created_at < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'
       `;
       break;
     case 'month':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND MONTH(o.created_at) = MONTH(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
       `;
       break;
     case 'quarter':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND QUARTER(o.created_at) = QUARTER(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(QUARTER FROM o.created_at) = EXTRACT(QUARTER FROM CURRENT_DATE)
       `;
       break;
     case 'year':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
       `;
       break;
     default:
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND MONTH(o.created_at) = MONTH(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
       `;
   }
 
@@ -361,18 +360,18 @@ const getAllTransactionsForPeriod = async (userId, period) => {
     FROM operation o
     JOIN category c ON o.category_id = c.id
     JOIN operationtype ot ON o.operation_type_id = ot.id
-    WHERE o.user_id = ?
+    WHERE o.user_id = $1
       AND (${dateCondition})
     ORDER BY o.created_at DESC
   `;
 
   console.log(`🔍 Получение ВСЕХ транзакций для пользователя ${userId} за период ${period}`);
   
-  const [transactionsResult] = await db.execute(transactionsQuery, [userId]);
+  const transactionsResult = await db.query(transactionsQuery, [userId]);
 
-  console.log(`✅ Получено ${transactionsResult.length} транзакций за период`);
+  console.log(`✅ Получено ${transactionsResult.rows.length} транзакций за период`);
 
-  return transactionsResult.map(row => ({
+  return transactionsResult.rows.map(row => ({
     id: row.id,
     amount: parseFloat(row.amount),
     description: row.description,
@@ -389,31 +388,31 @@ const getAdditionalMetrics = async (userId, period) => {
   switch (period) {
     case 'week':
       dateCondition = `
-        o.created_at >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
-        AND o.created_at < DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 7 DAY)
+        o.created_at >= DATE_TRUNC('week', CURRENT_DATE)
+        AND o.created_at < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'
       `;
       break;
     case 'month':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND MONTH(o.created_at) = MONTH(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
       `;
       break;
     case 'quarter':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND QUARTER(o.created_at) = QUARTER(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(QUARTER FROM o.created_at) = EXTRACT(QUARTER FROM CURRENT_DATE)
       `;
       break;
     case 'year':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
       `;
       break;
     default:
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND MONTH(o.created_at) = MONTH(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
       `;
   }
 
@@ -433,27 +432,27 @@ const getAdditionalMetrics = async (userId, period) => {
     FROM operation o
     JOIN operationtype ot ON o.operation_type_id = ot.id
     JOIN category c ON o.category_id = c.id
-    WHERE o.user_id = ?
+    WHERE o.user_id = $1
       AND (${dateCondition})
   `;
 
-  const [metricsResult] = await db.execute(metricsQuery, [userId]);
-  const metrics = metricsResult[0] || {
-    transaction_count: 0,
-    income_count: 0,
-    expense_count: 0,
-    average_transaction: 0,
-    largest_transaction: 0,
-    total_income: 0,
-    total_expense: 0,
-    active_days: 0,
-    unique_categories: 0,
-    unique_income_categories: 0,
-    unique_expense_categories: 0
+  const metricsResult = await db.query(metricsQuery, [userId]);
+  const metrics = metricsResult.rows[0] || {
+    transaction_count: '0',
+    income_count: '0',
+    expense_count: '0',
+    average_transaction: '0',
+    largest_transaction: '0',
+    total_income: '0',
+    total_expense: '0',
+    active_days: '0',
+    unique_categories: '0',
+    unique_income_categories: '0',
+    unique_expense_categories: '0'
   };
 
-  const savingsRate = metrics.total_income > 0 
-    ? ((metrics.total_income - metrics.total_expense) / metrics.total_income) * 100 
+  const savingsRate = parseFloat(metrics.total_income) > 0 
+    ? ((parseFloat(metrics.total_income) - parseFloat(metrics.total_expense)) / parseFloat(metrics.total_income)) * 100 
     : 0;
 
   return {
@@ -477,31 +476,31 @@ const getLimitsStatistics = async (userId, period) => {
   switch (period) {
     case 'week':
       dateCondition = `
-        o.created_at >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
-        AND o.created_at < DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 7 DAY)
+        o.created_at >= DATE_TRUNC('week', CURRENT_DATE)
+        AND o.created_at < DATE_TRUNC('week', CURRENT_DATE) + INTERVAL '1 week'
       `;
       break;
     case 'month':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
       `;
       break;
     case 'quarter':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND QUARTER(o.created_at) = QUARTER(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(QUARTER FROM o.created_at) = EXTRACT(QUARTER FROM CURRENT_DATE)
       `;
       break;
     case 'year':
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
       `;
       break;
     default:
       dateCondition = `
-        YEAR(o.created_at) = YEAR(CURDATE())
-        AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
+        EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
       `;
   }
 
@@ -522,13 +521,13 @@ const getLimitsStatistics = async (userId, period) => {
       ), 0) as current_spent
     FROM spendinglimit sl
     JOIN category c ON sl.category_id = c.id
-    WHERE sl.user_id = ?
+    WHERE sl.user_id = $1
   `;
 
-  const [limitsResult] = await db.execute(limitsQuery, [userId]);
+  const limitsResult = await db.query(limitsQuery, [userId]);
 
   const limitsStats = {
-    totalLimits: limitsResult.length,
+    totalLimits: limitsResult.rows.length,
     exceededLimits: 0,
     nearExceededLimits: 0,
     totalLimitAmount: 0,
@@ -537,7 +536,7 @@ const getLimitsStatistics = async (userId, period) => {
     limits: []
   };
 
-  limitsResult.forEach(limit => {
+  limitsResult.rows.forEach(limit => {
     const currentSpent = parseFloat(limit.current_spent);
     const limitAmount = parseFloat(limit.limit_amount);
     const percentage = limitAmount > 0 ? (currentSpent / limitAmount) * 100 : 0;
@@ -594,14 +593,14 @@ const getCategoryStatsCustom = async (userId, startDate, endDate) => {
     FROM operation o
     JOIN category c ON o.category_id = c.id
     JOIN operationtype ot ON o.operation_type_id = ot.id
-    WHERE o.user_id = ?
-      AND o.created_at >= ? AND o.created_at <= ?
+    WHERE o.user_id = $1
+      AND o.created_at >= $2 AND o.created_at <= $3
     GROUP BY c.name, c.color, ot.name
     ORDER BY ot.name, SUM(o.amount) DESC
   `;
 
-  const [categoriesResult] = await db.execute(categoriesQuery, [userId, startDate, endDate]);
-  return processCategories(categoriesResult);
+  const categoriesResult = await db.query(categoriesQuery, [userId, startDate, endDate]);
+  return processCategories(categoriesResult.rows);
 };
 
 const getAllTransactionsCustom = async (userId, startDate, endDate) => {
@@ -616,18 +615,18 @@ const getAllTransactionsCustom = async (userId, startDate, endDate) => {
     FROM operation o
     JOIN category c ON o.category_id = c.id
     JOIN operationtype ot ON o.operation_type_id = ot.id
-    WHERE o.user_id = ?
-      AND o.created_at >= ? AND o.created_at <= ?
+    WHERE o.user_id = $1
+      AND o.created_at >= $2 AND o.created_at <= $3
     ORDER BY o.created_at DESC
   `;
 
   console.log(`🔍 Получение ВСЕХ транзакций для пользователя ${userId} за период ${startDate} - ${endDate}`);
   
-  const [transactionsResult] = await db.execute(transactionsQuery, [userId, startDate, endDate]);
+  const transactionsResult = await db.query(transactionsQuery, [userId, startDate, endDate]);
 
-  console.log(`✅ Получено ${transactionsResult.length} транзакций за кастомный период`);
+  console.log(`✅ Получено ${transactionsResult.rows.length} транзакций за кастомный период`);
 
-  return transactionsResult.map(row => ({
+  return transactionsResult.rows.map(row => ({
     id: row.id,
     amount: parseFloat(row.amount),
     description: row.description,
@@ -654,27 +653,27 @@ const getAdditionalMetricsCustom = async (userId, startDate, endDate) => {
     FROM operation o
     JOIN operationtype ot ON o.operation_type_id = ot.id
     JOIN category c ON o.category_id = c.id
-    WHERE o.user_id = ?
-      AND o.created_at >= ? AND o.created_at <= ?
+    WHERE o.user_id = $1
+      AND o.created_at >= $2 AND o.created_at <= $3
   `;
 
-  const [metricsResult] = await db.execute(metricsQuery, [userId, startDate, endDate]);
-  const metrics = metricsResult[0] || {
-    transaction_count: 0,
-    income_count: 0,
-    expense_count: 0,
-    average_transaction: 0,
-    largest_transaction: 0,
-    total_income: 0,
-    total_expense: 0,
-    active_days: 0,
-    unique_categories: 0,
-    unique_income_categories: 0,
-    unique_expense_categories: 0
+  const metricsResult = await db.query(metricsQuery, [userId, startDate, endDate]);
+  const metrics = metricsResult.rows[0] || {
+    transaction_count: '0',
+    income_count: '0',
+    expense_count: '0',
+    average_transaction: '0',
+    largest_transaction: '0',
+    total_income: '0',
+    total_expense: '0',
+    active_days: '0',
+    unique_categories: '0',
+    unique_income_categories: '0',
+    unique_expense_categories: '0'
   };
 
-  const savingsRate = metrics.total_income > 0 
-    ? ((metrics.total_income - metrics.total_expense) / metrics.total_income) * 100 
+  const savingsRate = parseFloat(metrics.total_income) > 0 
+    ? ((parseFloat(metrics.total_income) - parseFloat(metrics.total_expense)) / parseFloat(metrics.total_income)) * 100 
     : 0;
 
   return {
@@ -704,17 +703,17 @@ const getLimitsStatisticsCustom = async (userId, startDate, endDate) => {
         FROM operation o 
         WHERE o.category_id = sl.category_id 
           AND o.user_id = sl.user_id
-          AND o.created_at >= ? AND o.created_at <= ?
+          AND o.created_at >= $1 AND o.created_at <= $2
       ), 0) as current_spent
     FROM spendinglimit sl
     JOIN category c ON sl.category_id = c.id
-    WHERE sl.user_id = ?
+    WHERE sl.user_id = $3
   `;
 
-  const [limitsResult] = await db.execute(limitsQuery, [startDate, endDate, userId]);
+  const limitsResult = await db.query(limitsQuery, [startDate, endDate, userId]);
 
   const limitsStats = {
-    totalLimits: limitsResult.length,
+    totalLimits: limitsResult.rows.length,
     exceededLimits: 0,
     nearExceededLimits: 0,
     totalLimitAmount: 0,
@@ -723,7 +722,7 @@ const getLimitsStatisticsCustom = async (userId, startDate, endDate) => {
     limits: []
   };
 
-  limitsResult.forEach(limit => {
+  limitsResult.rows.forEach(limit => {
     const currentSpent = parseFloat(limit.current_spent);
     const limitAmount = parseFloat(limit.limit_amount);
     const percentage = limitAmount > 0 ? (currentSpent / limitAmount) * 100 : 0;
@@ -777,8 +776,8 @@ const getBasicStatisticsCustom = async (userId, startDate, endDate) => {
       COALESCE(SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END), 0) AS net_flow
     FROM operation o
     JOIN operationtype ot ON o.operation_type_id = ot.id
-    WHERE o.user_id = ?
-      AND o.created_at >= ? AND o.created_at <= ?
+    WHERE o.user_id = $1
+      AND o.created_at >= $2 AND o.created_at <= $3
   `;
 
   const dynamicsQuery = `
@@ -788,24 +787,24 @@ const getBasicStatisticsCustom = async (userId, startDate, endDate) => {
       SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END) AS expense
     FROM operation o
     JOIN operationtype ot ON o.operation_type_id = ot.id
-    WHERE o.user_id = ?
-      AND o.created_at >= ? AND o.created_at <= ?
+    WHERE o.user_id = $1
+      AND o.created_at >= $2 AND o.created_at <= $3
     GROUP BY DATE(o.created_at)
     ORDER BY DATE(o.created_at) ASC
   `;
 
   const [summaryResult, dynamicsResult] = await Promise.all([
-    db.execute(summaryQuery, [userId, startDate, endDate]),
-    db.execute(dynamicsQuery, [userId, startDate, endDate])
+    db.query(summaryQuery, [userId, startDate, endDate]),
+    db.query(dynamicsQuery, [userId, startDate, endDate])
   ]);
 
-  const summaryData = summaryResult[0][0] || { 
+  const summaryData = summaryResult.rows[0] || { 
     total_income: 0, 
     total_expense: 0, 
     net_flow: 0 
   };
 
-  const dynamicsData = dynamicsResult[0];
+  const dynamicsData = dynamicsResult.rows;
 
   // Строим кумулятивный баланс для графика
   let cumulativeBalance = 0;
@@ -821,9 +820,9 @@ const getBasicStatisticsCustom = async (userId, startDate, endDate) => {
 
   return {
     summary: {
-      netFlow: summaryData.net_flow,
-      income: summaryData.total_income,
-      expense: summaryData.total_expense
+      netFlow: parseFloat(summaryData.net_flow),
+      income: parseFloat(summaryData.total_income),
+      expense: parseFloat(summaryData.total_expense)
     },
     dynamics: chartData
   };
@@ -1033,22 +1032,22 @@ const getLifetimeStatistics = async (req, res) => {
         MIN(o.created_at) as first_transaction,
         MAX(o.created_at) as last_transaction,
         COUNT(DISTINCT DATE(o.created_at)) as total_active_days,
-        DATEDIFF(MAX(o.created_at), MIN(o.created_at)) as tracking_period_days
+        EXTRACT(DAY FROM (MAX(o.created_at) - MIN(o.created_at))) as tracking_period_days
       FROM operation o
       JOIN operationtype ot ON o.operation_type_id = ot.id
-      WHERE o.user_id = ?
+      WHERE o.user_id = $1
     `;
 
-    const [lifetimeResult] = await db.execute(lifetimeQuery, [userId]);
-    const lifetimeData = lifetimeResult[0] || {
-      total_transactions: 0,
-      total_amount: 0,
-      lifetime_income: 0,
-      lifetime_expense: 0,
+    const lifetimeResult = await db.query(lifetimeQuery, [userId]);
+    const lifetimeData = lifetimeResult.rows[0] || {
+      total_transactions: '0',
+      total_amount: '0',
+      lifetime_income: '0',
+      lifetime_expense: '0',
       first_transaction: null,
       last_transaction: null,
-      total_active_days: 0,
-      tracking_period_days: 0
+      total_active_days: '0',
+      tracking_period_days: '0'
     };
 
     // Самые популярные категории
@@ -1062,35 +1061,35 @@ const getLifetimeStatistics = async (req, res) => {
       FROM operation o
       JOIN category c ON o.category_id = c.id
       JOIN operationtype ot ON o.operation_type_id = ot.id
-      WHERE o.user_id = ?
+      WHERE o.user_id = $1
       GROUP BY c.name, c.color, ot.name
       ORDER BY COUNT(o.id) DESC
       LIMIT 10
     `;
 
-    const [popularCategoriesResult] = await db.execute(popularCategoriesQuery, [userId]);
+    const popularCategoriesResult = await db.query(popularCategoriesQuery, [userId]);
 
     // Месяцы с наибольшими доходами и расходами
     const topMonthsQuery = `
       SELECT 
-        DATE_FORMAT(o.created_at, '%Y-%m') as month,
+        TO_CHAR(o.created_at, 'YYYY-MM') as month,
         SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END) as income,
         SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END) as expense,
         COUNT(o.id) as transactions
       FROM operation o
       JOIN operationtype ot ON o.operation_type_id = ot.id
-      WHERE o.user_id = ?
-      GROUP BY DATE_FORMAT(o.created_at, '%Y-%m')
+      WHERE o.user_id = $1
+      GROUP BY TO_CHAR(o.created_at, 'YYYY-MM')
       ORDER BY (SUM(CASE WHEN ot.name = 'Доход' THEN o.amount ELSE 0 END) - SUM(CASE WHEN ot.name = 'Расход' THEN o.amount ELSE 0 END)) DESC
       LIMIT 5
     `;
 
-    const [topMonthsResult] = await db.execute(topMonthsQuery, [userId]);
+    const topMonthsResult = await db.query(topMonthsQuery, [userId]);
 
     const lifetimeNetWorth = parseFloat(lifetimeData.lifetime_income) - parseFloat(lifetimeData.lifetime_expense);
-    const avgDailyTransactions = lifetimeData.tracking_period_days > 0 ? 
+    const avgDailyTransactions = parseFloat(lifetimeData.tracking_period_days) > 0 ? 
       parseFloat(lifetimeData.total_transactions) / parseFloat(lifetimeData.tracking_period_days) : 0;
-    const savingsRateLifetime = lifetimeData.lifetime_income > 0 ? 
+    const savingsRateLifetime = parseFloat(lifetimeData.lifetime_income) > 0 ? 
       (lifetimeNetWorth / parseFloat(lifetimeData.lifetime_income)) * 100 : 0;
 
     return res.status(200).json({
@@ -1106,14 +1105,14 @@ const getLifetimeStatistics = async (req, res) => {
         avgDailyTransactions: Math.round(avgDailyTransactions * 100) / 100,
         savingsRate: Math.round(savingsRateLifetime * 100) / 100
       },
-      popularCategories: popularCategoriesResult.map(row => ({
+      popularCategories: popularCategoriesResult.rows.map(row => ({
         name: row.name,
         color: row.color || '#666666',
         count: parseInt(row.count),
         totalAmount: parseFloat(row.total_amount),
         type: row.type === 'Доход' ? 'income' : 'expense'
       })),
-      topMonths: topMonthsResult.map(row => ({
+      topMonths: topMonthsResult.rows.map(row => ({
         month: row.month,
         income: parseFloat(row.income),
         expense: parseFloat(row.expense),

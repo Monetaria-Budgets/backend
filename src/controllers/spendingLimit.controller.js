@@ -1,4 +1,3 @@
-// controllers/spendingLimit.controller.js
 const db = require('../db/db');
 
 // Получить все лимиты пользователя
@@ -19,18 +18,18 @@ const getSpendingLimits = async (req, res) => {
           FROM operation o 
           WHERE o.category_id = sl.category_id 
             AND o.user_id = sl.user_id
-            AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
-            AND YEAR(o.created_at) = YEAR(CURRENT_DATE())
+            AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
+            AND EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
         ), 0) as current_spent
       FROM spendinglimit sl
-      WHERE sl.user_id = ?
+      WHERE sl.user_id = $1
       ORDER BY sl.created_at DESC
     `;
 
-    const [limits] = await db.execute(limitsQuery, [userId]);
-    console.log('✅ Найдено лимитов:', limits.length);
+    const limits = await db.query(limitsQuery, [userId]);
+    console.log('✅ Найдено лимитов:', limits.rows.length);
 
-    return res.status(200).json(limits);
+    return res.status(200).json(limits.rows);
 
   } catch (err) {
     console.error('❌ Ошибка при получении лимитов:', err);
@@ -58,19 +57,19 @@ const getCategoriesWithLimits = async (req, res) => {
           FROM operation o 
           WHERE o.category_id = c.id 
             AND o.user_id = c.user_id
-            AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
-            AND YEAR(o.created_at) = YEAR(CURRENT_DATE())
+            AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
+            AND EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
         ), 0) as current_spent
       FROM category c
       LEFT JOIN spendinglimit sl ON c.id = sl.category_id AND sl.user_id = c.user_id
-      WHERE c.user_id = ?
+      WHERE c.user_id = $1
       ORDER BY c.created_at DESC
     `;
 
-    const [categories] = await db.execute(categoriesQuery, [userId]);
+    const categories = await db.query(categoriesQuery, [userId]);
     
     // Форматируем ответ - ИСПРАВЛЕНА ЛОГИКА ПРЕВЫШЕНИЯ
-    const formattedCategories = categories.map(cat => {
+    const formattedCategories = categories.rows.map(cat => {
       const currentSpent = parseFloat(cat.current_spent) || 0;
       const limitAmount = parseFloat(cat.limit_amount) || 0;
       
@@ -116,21 +115,21 @@ const checkLimitLimit = async (req, res) => {
     // Проверяем премиум статус через таблицу premiumuser
     const premiumQuery = `
       SELECT * FROM premiumuser 
-      WHERE user_id = ? AND subscription_end > NOW()
+      WHERE user_id = $1 AND subscription_end > CURRENT_TIMESTAMP
     `;
-    const [premiumResult] = await db.execute(premiumQuery, [userId]);
+    const premiumResult = await db.query(premiumQuery, [userId]);
     
-    const isPremium = premiumResult.length > 0;
+    const isPremium = premiumResult.rows.length > 0;
     console.log('👤 Премиум статус для лимитов:', isPremium);
 
     // Считаем текущее количество лимитов
     const countQuery = `
       SELECT COUNT(*) as count 
       FROM spendinglimit 
-      WHERE user_id = ?
+      WHERE user_id = $1
     `;
-    const [countResult] = await db.execute(countQuery, [userId]);
-    const current = countResult[0].count;
+    const countResult = await db.query(countQuery, [userId]);
+    const current = parseInt(countResult.rows[0].count);
 
     const limit = isPremium ? 999 : 3;
 
@@ -165,36 +164,36 @@ const createSpendingLimit = async (req, res) => {
     }
 
     // Проверяем, что категория принадлежит пользователю
-    const categoryQuery = `SELECT * FROM category WHERE id = ? AND user_id = ?`;
-    const [categoryResult] = await db.execute(categoryQuery, [category_id, userId]);
+    const categoryQuery = `SELECT * FROM category WHERE id = $1 AND user_id = $2`;
+    const categoryResult = await db.query(categoryQuery, [category_id, userId]);
 
-    if (categoryResult.length === 0) {
+    if (categoryResult.rows.length === 0) {
       return res.status(404).json({ error: 'Категория не найдена' });
     }
 
     // Проверяем, не установлен ли уже лимит для этой категории
-    const existingLimitQuery = `SELECT * FROM spendinglimit WHERE category_id = ? AND user_id = ?`;
-    const [existingLimitResult] = await db.execute(existingLimitQuery, [category_id, userId]);
+    const existingLimitQuery = `SELECT * FROM spendinglimit WHERE category_id = $1 AND user_id = $2`;
+    const existingLimitResult = await db.query(existingLimitQuery, [category_id, userId]);
 
-    if (existingLimitResult.length > 0) {
+    if (existingLimitResult.rows.length > 0) {
       return res.status(400).json({ error: 'Лимит для этой категории уже установлен' });
     }
 
     // Проверяем лимит на создание лимитов
     const premiumQuery = `
       SELECT * FROM premiumuser 
-      WHERE user_id = ? AND subscription_end > NOW()
+      WHERE user_id = $1 AND subscription_end > CURRENT_TIMESTAMP
     `;
-    const [premiumResult] = await db.execute(premiumQuery, [userId]);
-    const isPremium = premiumResult.length > 0;
+    const premiumResult = await db.query(premiumQuery, [userId]);
+    const isPremium = premiumResult.rows.length > 0;
 
     const countQuery = `
       SELECT COUNT(*) as count 
       FROM spendinglimit 
-      WHERE user_id = ?
+      WHERE user_id = $1
     `;
-    const [countResult] = await db.execute(countQuery, [userId]);
-    const currentCount = countResult[0].count;
+    const countResult = await db.query(countQuery, [userId]);
+    const currentCount = parseInt(countResult.rows[0].count);
 
     if (!isPremium && currentCount >= 3) {
       return res.status(403).json({ 
@@ -204,16 +203,17 @@ const createSpendingLimit = async (req, res) => {
 
     const insertQuery = `
       INSERT INTO spendinglimit (category_id, amount, user_id, created_at)
-      VALUES (?, ?, ?, NOW())
+      VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+      RETURNING id
     `;
 
-    const [result] = await db.execute(insertQuery, [
+    const result = await db.query(insertQuery, [
       category_id,
       amount,
       userId
     ]);
 
-    console.log('✅ Лимит создан с ID:', result.insertId);
+    console.log('✅ Лимит создан с ID:', result.rows[0].id);
 
     // Получаем созданный лимит с текущими расходами
     const limitQuery = `
@@ -228,16 +228,16 @@ const createSpendingLimit = async (req, res) => {
           FROM operation o 
           WHERE o.category_id = sl.category_id 
             AND o.user_id = sl.user_id
-            AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
-            AND YEAR(o.created_at) = YEAR(CURRENT_DATE())
+            AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
+            AND EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
         ), 0) as current_spent
       FROM spendinglimit sl
-      WHERE sl.id = ?
+      WHERE sl.id = $1
     `;
     
-    const [limitResult] = await db.execute(limitQuery, [result.insertId]);
+    const limitResult = await db.query(limitQuery, [result.rows[0].id]);
 
-    return res.status(201).json(limitResult[0]);
+    return res.status(201).json(limitResult.rows[0]);
 
   } catch (err) {
     console.error('❌ Ошибка при создании лимита:', err);
@@ -258,11 +258,11 @@ const updateSpendingLimit = async (req, res) => {
     const checkQuery = `
       SELECT sl.* 
       FROM spendinglimit sl
-      WHERE sl.id = ? AND sl.user_id = ?
+      WHERE sl.id = $1 AND sl.user_id = $2
     `;
-    const [checkResult] = await db.execute(checkQuery, [limitId, userId]);
+    const checkResult = await db.query(checkQuery, [limitId, userId]);
 
-    if (checkResult.length === 0) {
+    if (checkResult.rows.length === 0) {
       return res.status(404).json({ error: 'Лимит не найден' });
     }
 
@@ -273,11 +273,11 @@ const updateSpendingLimit = async (req, res) => {
     const updateQuery = `
       UPDATE spendinglimit 
       SET 
-        amount = COALESCE(?, amount)
-      WHERE id = ? AND user_id = ?
+        amount = COALESCE($1, amount)
+      WHERE id = $2 AND user_id = $3
     `;
 
-    await db.execute(updateQuery, [
+    await db.query(updateQuery, [
       amount || null,
       limitId,
       userId
@@ -298,15 +298,15 @@ const updateSpendingLimit = async (req, res) => {
           FROM operation o 
           WHERE o.category_id = sl.category_id 
             AND o.user_id = sl.user_id
-            AND MONTH(o.created_at) = MONTH(CURRENT_DATE())
-            AND YEAR(o.created_at) = YEAR(CURRENT_DATE())
+            AND EXTRACT(MONTH FROM o.created_at) = EXTRACT(MONTH FROM CURRENT_DATE)
+            AND EXTRACT(YEAR FROM o.created_at) = EXTRACT(YEAR FROM CURRENT_DATE)
         ), 0) as current_spent
       FROM spendinglimit sl
-      WHERE sl.id = ?
+      WHERE sl.id = $1
     `;
-    const [limitResult] = await db.execute(limitQuery, [limitId]);
+    const limitResult = await db.query(limitQuery, [limitId]);
 
-    return res.status(200).json(limitResult[0]);
+    return res.status(200).json(limitResult.rows[0]);
 
   } catch (err) {
     console.error('❌ Ошибка при обновлении лимита:', err);
@@ -326,16 +326,16 @@ const deleteSpendingLimit = async (req, res) => {
     const checkQuery = `
       SELECT sl.* 
       FROM spendinglimit sl
-      WHERE sl.id = ? AND sl.user_id = ?
+      WHERE sl.id = $1 AND sl.user_id = $2
     `;
-    const [checkResult] = await db.execute(checkQuery, [limitId, userId]);
+    const [checkResult] = await db.query(checkQuery, [limitId, userId]);
 
-    if (checkResult.length === 0) {
+    if (checkResult.rows.length === 0) {
       return res.status(404).json({ error: 'Лимит не найден' });
     }
 
-    const deleteQuery = `DELETE FROM spendinglimit WHERE id = ? AND user_id = ?`;
-    await db.execute(deleteQuery, [limitId, userId]);
+    const deleteQuery = `DELETE FROM spendinglimit WHERE id = $1 AND user_id = $2`;
+    await db.query(deleteQuery, [limitId, userId]);
 
     console.log('✅ Лимит удален');
 

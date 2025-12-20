@@ -12,12 +12,12 @@ const auth = async (req, res, next) => {
     const token = authHeader.split(' ')[1];
 
     try {
-        const [blacklisted] = await db.execute(
-            'SELECT id FROM blacklisted_tokens WHERE token = ? AND expires_at > NOW()',
+        const blacklisted = await db.query(
+            'SELECT id FROM blacklisted_tokens WHERE token = $1 AND expires_at > CURRENT_TIMESTAMP',
             [token]
         );
         
-        if (blacklisted.length > 0) {
+        if (blacklisted.rows.length > 0) {
             return res.status(401).json({ error: 'Токен недействителен' });
         }
 

@@ -12,22 +12,22 @@ const getUserNotifications = async (req, res) => {
     console.log('🔔 Query params:', { userId, limit, offset });
 
     // ИСПРАВЛЕННЫЙ ЗАПРОС - добавляем фильтр по scheduled_at
-    const [notifications] = await db.execute(
+    const notifications = await db.query(
       `SELECT * FROM notification 
-      WHERE user_id = ? 
+      WHERE user_id = $1 
       AND source = 'push'
-      AND (scheduled_at IS NULL OR scheduled_at <= NOW())
+      AND (scheduled_at IS NULL OR scheduled_at <= CURRENT_TIMESTAMP)
       ORDER BY created_at DESC`,
       [userId]
     );
 
-    console.log('🔔 Found notifications:', notifications.length);
+    console.log('🔔 Found notifications:', notifications.rows.length);
 
-    const paginatedNotifications = notifications.slice(offset, offset + limit);
-    const [types] = await db.execute('SELECT * FROM notificationtype');
+    const paginatedNotifications = notifications.rows.slice(offset, offset + limit);
+    const types = await db.query('SELECT * FROM notificationtype');
     
     const notificationsWithTypes = paginatedNotifications.map(notif => {
-      const type = types.find(t => t.id === notif.type_id);
+      const type = types.rows.find(t => t.id === notif.type_id);
       return {
         ...notif,
         type_name: type ? type.name : 'unknown'
@@ -38,7 +38,7 @@ const getUserNotifications = async (req, res) => {
       success: true,
       data: notificationsWithTypes,
       pagination: {
-        total: notifications.length,
+        total: notifications.rows.length,
         limit: limit,
         offset: offset
       }
@@ -58,17 +58,17 @@ const deleteAllNotifications = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const [result] = await db.execute(
-      'DELETE FROM notification WHERE user_id = ? AND source = "push"',
+    const result = await db.query(
+      'DELETE FROM notification WHERE user_id = $1 AND source = \'push\'',
       [userId]
     );
 
-    console.log(`🗑️ Удалены все уведомления пользователя ${userId}: ${result.affectedRows} шт.`);
+    console.log(`🗑️ Удалены все уведомления пользователя ${userId}: ${result.rowCount} шт.`);
 
     return res.status(200).json({
       success: true,
-      message: `Все уведомления удалены (${result.affectedRows} шт.)`,
-      deletedCount: result.affectedRows
+      message: `Все уведомления удалены (${result.rowCount} шт.)`,
+      deletedCount: result.rowCount
     });
   } catch (error) {
     console.error('Delete all notifications error:', error);
@@ -84,39 +84,39 @@ const getUnreadNotifications = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const [notifications] = await db.execute(
+    const notifications = await db.query(
       `SELECT * FROM notification 
-       WHERE user_id = ? 
-       AND is_read = 0 
+       WHERE user_id = $1 
+       AND is_read = false 
        AND source = 'push'
-       AND (scheduled_at IS NULL OR scheduled_at <= NOW())  // ← ДОБАВЛЕНО
+       AND (scheduled_at IS NULL OR scheduled_at <= CURRENT_TIMESTAMP)
        ORDER BY created_at DESC`,
       [userId]
     );
 
-    const [types] = await db.execute('SELECT * FROM notificationtype');
+    const types = await db.query('SELECT * FROM notificationtype');
     
-    const notificationsWithTypes = notifications.map(notif => {
-      const type = types.find(t => t.id === notif.type_id);
+    const notificationsWithTypes = notifications.rows.map(notif => {
+      const type = types.rows.find(t => t.id === notif.type_id);
       return {
         ...notif,
         type_name: type ? type.name : 'unknown'
       };
     });
 
-    const [countResult] = await db.execute(
+    const countResult = await db.query(
       `SELECT COUNT(*) as count FROM notification 
-       WHERE user_id = ? 
-       AND is_read = 0 
-       AND source = "push" 
-       AND (scheduled_at IS NULL OR scheduled_at <= NOW())`,  // ← ДОБАВЛЕНО
+       WHERE user_id = $1 
+       AND is_read = false 
+       AND source = 'push' 
+       AND (scheduled_at IS NULL OR scheduled_at <= CURRENT_TIMESTAMP)`,
       [userId]
     );
 
     return res.status(200).json({
       success: true,
       data: notificationsWithTypes,
-      unreadCount: countResult[0].count
+      unreadCount: parseInt(countResult.rows[0].count)
     });
   } catch (error) {
     console.error('Get unread notifications error:', error);
@@ -133,12 +133,12 @@ const markAsRead = async (req, res) => {
     const userId = req.user.userId;
     const notificationId = parseInt(req.params.notificationId);
 
-    const [result] = await db.execute(
-      'UPDATE notification SET is_read = 1 WHERE id = ? AND user_id = ?',
+    const result = await db.query(
+      'UPDATE notification SET is_read = true WHERE id = $1 AND user_id = $2',
       [notificationId, userId]
     );
 
-    if (result.affectedRows === 0) {
+    if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
         error: 'Уведомление не найдено'
@@ -163,19 +163,19 @@ const markAllAsRead = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const [result] = await db.execute(
-      `UPDATE notification SET is_read = 1 
-       WHERE user_id = ? 
-       AND is_read = 0 
-       AND source = "push" 
-       AND (scheduled_at IS NULL OR scheduled_at <= NOW())`,  // ← ДОБАВЛЕНО
+    const result = await db.query(
+      `UPDATE notification SET is_read = true 
+       WHERE user_id = $1 
+       AND is_read = false 
+       AND source = 'push' 
+       AND (scheduled_at IS NULL OR scheduled_at <= CURRENT_TIMESTAMP)`,
       [userId]
     );
 
     return res.status(200).json({
       success: true,
       message: `Все уведомления помечены как прочитанные`,
-      updatedCount: result.affectedRows
+      updatedCount: result.rowCount
     });
   } catch (error) {
     console.error('Mark all as read error:', error);
@@ -192,12 +192,12 @@ const deleteNotification = async (req, res) => {
     const userId = req.user.userId;
     const notificationId = parseInt(req.params.notificationId);
 
-    const [result] = await db.execute(
-      'DELETE FROM notification WHERE id = ? AND user_id = ?',
+    const result = await db.query(
+      'DELETE FROM notification WHERE id = $1 AND user_id = $2',
       [notificationId, userId]
     );
 
-    if (result.affectedRows === 0) {
+    if (result.rowCount === 0) {
       return res.status(404).json({
         success: false,
         error: 'Уведомление не найдено'
@@ -222,18 +222,18 @@ const getUnreadCount = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const [result] = await db.execute(
+    const result = await db.query(
       `SELECT COUNT(*) as count FROM notification 
-       WHERE user_id = ? 
-       AND is_read = 0 
+       WHERE user_id = $1 
+       AND is_read = false 
        AND source = 'push'
-       AND (scheduled_at IS NULL OR scheduled_at <= NOW())`,  // ← ДОБАВЛЕНО
+       AND (scheduled_at IS NULL OR scheduled_at <= CURRENT_TIMESTAMP)`,
       [userId]
     );
 
     return res.status(200).json({
       success: true,
-      unreadCount: result[0].count
+      unreadCount: parseInt(result.rows[0].count)
     });
   } catch (error) {
     console.error('Get unread count error:', error);
@@ -250,29 +250,29 @@ const sendTestNotification = async (req, res) => {
     const userId = req.user.userId;
     const { message, type } = req.body;
 
-    const [typeRows] = await db.execute(
-      'SELECT id FROM notificationtype WHERE name = ?',
+    const typeRows = await db.query(
+      'SELECT id FROM notificationtype WHERE name = $1',
       [type || 'system_update']
     );
 
-    if (typeRows.length === 0) {
+    if (typeRows.rows.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Тип уведомления не найден'
       });
     }
 
-    const typeId = typeRows[0].id;
+    const typeId = typeRows.rows[0].id;
 
-    const [insertResult] = await db.execute(
-      'INSERT INTO notification (user_id, type_id, message, source, is_read, created_at) VALUES (?, ?, ?, "push", 0, NOW())',
+    const insertResult = await db.query(
+      'INSERT INTO notification (user_id, type_id, message, source, is_read, created_at) VALUES ($1, $2, $3, \'push\', false, CURRENT_TIMESTAMP) RETURNING id',
       [userId, typeId, message || 'Тестовое уведомление']
     );
 
     return res.status(200).json({
       success: true,
       message: 'Тестовое уведомление отправлено',
-      notificationId: insertResult.insertId
+      notificationId: insertResult.rows[0].id
     });
   } catch (error) {
     console.error('Send test notification error:', error);
@@ -304,8 +304,6 @@ const createScheduledNotification = async (req, res) => {
       });
     }
 
-    const mysqlScheduledAt = scheduledDate.toISOString().slice(0, 19).replace('T', ' ');
-
     const now = new Date();
     if (scheduledDate <= now) {
       return res.status(400).json({
@@ -314,34 +312,34 @@ const createScheduledNotification = async (req, res) => {
       });
     }
 
-    const [typeRows] = await db.execute(
-      'SELECT id FROM notificationtype WHERE id = ?',
+    const typeRows = await db.query(
+      'SELECT id FROM notificationtype WHERE id = $1',
       [type_id]
     );
 
-    if (typeRows.length === 0) {
+    if (typeRows.rows.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Тип уведомления не найден'
       });
     }
 
-    const [result] = await db.execute(
-      'INSERT INTO notification (user_id, type_id, message, source, is_read, created_at, scheduled_at) VALUES (?, ?, ?, "push", 0, NOW(), ?)',
-      [userId, type_id, message, mysqlScheduledAt]
+    const result = await db.query(
+      'INSERT INTO notification (user_id, type_id, message, source, is_read, created_at, scheduled_at) VALUES ($1, $2, $3, \'push\', false, CURRENT_TIMESTAMP, $4) RETURNING id',
+      [userId, type_id, message, scheduledDate]
     );
 
     console.log('📅 Создано отложенное уведомление:', {
-      id: result.insertId,
-      scheduledAt: mysqlScheduledAt
+      id: result.rows[0].id,
+      scheduledAt: scheduledDate
     });
 
     return res.status(201).json({
       success: true,
       message: 'Уведомление запланировано',
       data: {
-        id: result.insertId,
-        scheduled_at: mysqlScheduledAt
+        id: result.rows[0].id,
+        scheduled_at: scheduledDate
       }
     });
   } catch (error) {
@@ -367,24 +365,24 @@ const sendNotificationToUser = async (req, res) => {
       });
     }
 
-    const [userRows] = await db.execute(
-      'SELECT id FROM user WHERE id = ?',
+    const userRows = await db.query(
+      'SELECT id FROM "user" WHERE id = $1',
       [user_id]
     );
 
-    if (userRows.length === 0) {
+    if (userRows.rows.length === 0) {
       return res.status(404).json({
         success: false,
         error: 'Пользователь не найден'
       });
     }
 
-    const [typeRows] = await db.execute(
-      'SELECT id FROM notificationtype WHERE id = ?',
+    const typeRows = await db.query(
+      'SELECT id FROM notificationtype WHERE id = $1',
       [type_id]
     );
 
-    if (typeRows.length === 0) {
+    if (typeRows.rows.length === 0) {
       return res.status(400).json({
         success: false,
         error: 'Тип уведомления не найден'
@@ -400,16 +398,16 @@ const sendNotificationToUser = async (req, res) => {
           error: 'Неверный формат даты'
         });
       }
-      mysqlScheduledAt = scheduledDate.toISOString().slice(0, 19).replace('T', ' ');
+      mysqlScheduledAt = scheduledDate;
     }
 
-    const [result] = await db.execute(
-      'INSERT INTO notification (user_id, type_id, message, source, is_read, created_at, scheduled_at) VALUES (?, ?, ?, "push", 0, NOW(), ?)',
+    const result = await db.query(
+      'INSERT INTO notification (user_id, type_id, message, source, is_read, created_at, scheduled_at) VALUES ($1, $2, $3, \'push\', false, CURRENT_TIMESTAMP, $4) RETURNING id',
       [user_id, type_id, message, mysqlScheduledAt]
     );
 
     console.log('✅ Уведомление создано в БД:', {
-      id: result.insertId,
+      id: result.rows[0].id,
       userId: user_id,
       scheduledAt: mysqlScheduledAt
     });
@@ -418,7 +416,7 @@ const sendNotificationToUser = async (req, res) => {
       success: true,
       message: 'Уведомление отправлено пользователю',
       data: {
-        id: result.insertId,
+        id: result.rows[0].id,
         user_id: user_id,
         scheduled_at: mysqlScheduledAt
       }
@@ -437,20 +435,20 @@ const getFutureNotifications = async (req, res) => {
   try {
     const userId = req.user.userId;
 
-    const [notifications] = await db.execute(
+    const notifications = await db.query(
       `SELECT * FROM notification 
-       WHERE user_id = ? 
+       WHERE user_id = $1 
        AND source = 'push'
        AND scheduled_at IS NOT NULL 
-       AND scheduled_at > NOW()
+       AND scheduled_at > CURRENT_TIMESTAMP
        ORDER BY scheduled_at ASC`,
       [userId]
     );
 
-    const [types] = await db.execute('SELECT * FROM notificationtype');
+    const types = await db.query('SELECT * FROM notificationtype');
     
-    const notificationsWithTypes = notifications.map(notif => {
-      const type = types.find(t => t.id === notif.type_id);
+    const notificationsWithTypes = notifications.rows.map(notif => {
+      const type = types.rows.find(t => t.id === notif.type_id);
       return {
         ...notif,
         type_name: type ? type.name : 'unknown'

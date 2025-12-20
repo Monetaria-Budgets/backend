@@ -25,14 +25,14 @@ class CurrencyController {
       console.log('Инициализация валют в БД...');
       
       // Сначала добавляем рубль, если его нет
-      const [existingRub] = await db.execute(
-        'SELECT id FROM currency WHERE code = "RUB"'
+      const existingRub = await db.query(
+        'SELECT id FROM currency WHERE code = \'RUB\''
       );
       
-      if (existingRub.length === 0) {
-        await db.execute(
+      if (existingRub.rows.length === 0) {
+        await db.query(
           `INSERT INTO currency (code, name, symbol, is_crypto, is_popular, sort_order) 
-           VALUES (?, ?, ?, ?, ?, ?)`,
+           VALUES ($1, $2, $3, $4, $5, $6)`,
           ['RUB', 'Российский рубль', '₽', 0, 1, 0]
         );
         console.log('Добавлен российский рубль');
@@ -45,18 +45,18 @@ class CurrencyController {
       let updatedCount = 0;
 
       for (const [code, data] of Object.entries(valutes)) {
-        const [existingCurrency] = await db.execute(
-          'SELECT id FROM currency WHERE code = ?',
+        const existingCurrency = await db.query(
+          'SELECT id FROM currency WHERE code = $1',
           [code]
         );
         
         const isPopular = this.popularCurrencies.includes(code);
         const sortOrder = isPopular ? this.popularCurrencies.indexOf(code) + 1 : 999;
 
-        if (existingCurrency.length === 0) {
-          await db.execute(
+        if (existingCurrency.rows.length === 0) {
+          await db.query(
             `INSERT INTO currency (code, name, symbol, nominal, is_crypto, is_popular, sort_order) 
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
             [
               code,
               data.Name,
@@ -69,10 +69,10 @@ class CurrencyController {
           );
           addedCount++;
         } else {
-          await db.execute(
+          await db.query(
             `UPDATE currency 
-             SET name = ?, symbol = ?, nominal = ?, is_popular = ?, sort_order = ?
-             WHERE code = ?`,
+             SET name = $1, symbol = $2, nominal = $3, is_popular = $4, sort_order = $5
+             WHERE code = $6`,
             [
               data.Name,
               data.CharCode,
@@ -125,17 +125,17 @@ class CurrencyController {
 
       for (const [code, data] of Object.entries(valutes)) {
         try {
-          const [currency] = await db.execute(
-            'SELECT id FROM currency WHERE code = ?',
+          const currency = await db.query(
+            'SELECT id FROM currency WHERE code = $1',
             [code]
           );
           
-          if (currency.length === 0) {
+          if (currency.rows.length === 0) {
             console.warn(`Валюта ${code} не найдена в БД, пропускаем`);
             continue;
           }
 
-          const currencyId = currency[0].id;
+          const currencyId = currency.rows[0].id;
           
           // Проверяем данные
           const currentRate = parseFloat(data.Value);
@@ -150,23 +150,23 @@ class CurrencyController {
           const changePercentage = previousRate !== 0 ? (changeAmount / previousRate) * 100 : 0;
 
           // Используем дату из ЦБ для вставки
-          await db.execute(
+          await db.query(
             `INSERT INTO exchange_rate 
             (currency_id, rate, previous_rate, change_amount, change_percentage, date) 
-            VALUES (?, ?, ?, ?, ?, ?) 
-            ON DUPLICATE KEY UPDATE 
-            rate = VALUES(rate), 
-            previous_rate = VALUES(previous_rate), 
-            change_amount = VALUES(change_amount), 
-            change_percentage = VALUES(change_percentage),
-            updated_at = CURRENT_TIMESTAMP`,
+            VALUES ($1, $2, $3, $4, $5, $6) 
+            ON CONFLICT (currency_id, date) DO UPDATE 
+            SET rate = EXCLUDED.rate, 
+                previous_rate = EXCLUDED.previous_rate, 
+                change_amount = EXCLUDED.change_amount, 
+                change_percentage = EXCLUDED.change_percentage,
+                updated_at = CURRENT_TIMESTAMP`,
             [
               currencyId,
               currentRate,
               previousRate,
               changeAmount,
               changePercentage,
-              cbrDate // Используем дату ЦБ
+              cbrDate
             ]
           );
 
@@ -204,23 +204,24 @@ class CurrencyController {
 
   async createExchangeRateTable() {
     try {
-      await db.execute(`
+      await db.query(`
         CREATE TABLE IF NOT EXISTS exchange_rate (
-          id int NOT NULL AUTO_INCREMENT,
-          currency_id int NOT NULL,
-          rate decimal(10,4) NOT NULL,
-          previous_rate decimal(10,4) DEFAULT NULL,
-          change_amount decimal(10,4) DEFAULT '0.0000',
-          change_percentage decimal(6,3) DEFAULT '0.000',
-          date date NOT NULL,
-          updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          PRIMARY KEY (id),
-          UNIQUE KEY uk_currency_date (currency_id, date),
-          KEY idx_date (date),
-          KEY idx_currency_id (currency_id),
-          CONSTRAINT fk_exchange_rate_currency FOREIGN KEY (currency_id) REFERENCES currency (id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci
+          id SERIAL PRIMARY KEY,
+          currency_id INTEGER NOT NULL REFERENCES currency(id) ON DELETE CASCADE,
+          rate DECIMAL(10,4) NOT NULL,
+          previous_rate DECIMAL(10,4) DEFAULT NULL,
+          change_amount DECIMAL(10,4) DEFAULT 0.0000,
+          change_percentage DECIMAL(6,3) DEFAULT 0.000,
+          date DATE NOT NULL,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE (currency_id, date)
+        )
       `);
+      
+      // Создаем индексы
+      await db.query('CREATE INDEX IF NOT EXISTS idx_exchange_rate_date ON exchange_rate(date)');
+      await db.query('CREATE INDEX IF NOT EXISTS idx_exchange_rate_currency_id ON exchange_rate(currency_id)');
+      
       console.log('Таблица exchange_rate создана/проверена');
     } catch (error) {
       console.error('Ошибка при создании таблицы exchange_rate:', error);
@@ -240,12 +241,12 @@ class CurrencyController {
       const showPopular = popular === 'true';
       
       // Сначала получаем самую свежую дату из базы
-      const [latestDateResult] = await db.execute(
+      const latestDateResult = await db.query(
         'SELECT DISTINCT date FROM exchange_rate ORDER BY date DESC LIMIT 1'
       );
       
-      const currentDate = latestDateResult.length > 0 
-        ? latestDateResult[0].date 
+      const currentDate = latestDateResult.rows.length > 0 
+        ? latestDateResult.rows[0].date 
         : new Date().toISOString().split('T')[0];
       
       console.log('Используемая дата для курсов:', currentDate);
@@ -266,18 +267,18 @@ class CurrencyController {
           er.date,
           er.updated_at
         FROM currency c
-        LEFT JOIN exchange_rate er ON c.id = er.currency_id AND er.date = ?
+        LEFT JOIN exchange_rate er ON c.id = er.currency_id AND er.date = $1
         WHERE c.code != 'RUB'
       `;
       
       const params = [currentDate];
       
       if (showPopular) {
-        query += ' AND c.is_popular = 1';
+        query += ' AND c.is_popular = true';
       }
       
       if (search) {
-        query += ' AND (c.name LIKE ? OR c.code LIKE ?)';
+        query += ' AND (c.name ILIKE $2 OR c.code ILIKE $3)';
         params.push(`%${search}%`, `%${search}%`);
       }
       
@@ -291,9 +292,9 @@ class CurrencyController {
         query += ` ORDER BY c.is_popular DESC, c.sort_order ASC, c.name ASC`;
       }
 
-      const [rates] = await db.execute(query, params);
+      const rates = await db.query(query, params);
       
-      const formattedRates = rates.map(rate => ({
+      const formattedRates = rates.rows.map(rate => ({
         id: rate.id,
         code: rate.code,
         name: rate.name,
@@ -332,7 +333,7 @@ class CurrencyController {
     try {
       const { currencyCode } = req.params;
       
-      const [rates] = await db.execute(
+      const rates = await db.query(
         `SELECT 
           c.code,
           c.name,
@@ -345,19 +346,19 @@ class CurrencyController {
           er.updated_at
          FROM currency c
          LEFT JOIN exchange_rate er ON c.id = er.currency_id
-         WHERE c.code = ? 
+         WHERE c.code = $1 
          ORDER BY er.date DESC LIMIT 1`,
         [currencyCode.toUpperCase()]
       );
       
-      if (rates.length === 0) {
+      if (rates.rows.length === 0) {
         return res.status(404).json({
           success: false,
           message: 'Валюта не найдена'
         });
       }
 
-      const rate = rates[0];
+      const rate = rates.rows[0];
       const result = {
         code: rate.code,
         name: rate.name,
@@ -388,15 +389,15 @@ class CurrencyController {
   async getCurrencyStatus(req, res) {
     try {
         // Проверяем, есть ли валюты в БД
-        const [currencies] = await db.execute('SELECT COUNT(*) as count FROM currency WHERE code != "RUB"');
-        const [rates] = await db.execute('SELECT COUNT(*) as count FROM exchange_rate');
+        const currencies = await db.query('SELECT COUNT(*) as count FROM currency WHERE code != \'RUB\'');
+        const rates = await db.query('SELECT COUNT(*) as count FROM exchange_rate');
         
         return res.json({
         success: true,
         data: {
-            currenciesCount: currencies[0].count,
-            ratesCount: rates[0].count,
-            needsInitialization: currencies[0].count === 0
+            currenciesCount: parseInt(currencies.rows[0].count),
+            ratesCount: parseInt(rates.rows[0].count),
+            needsInitialization: parseInt(currencies.rows[0].count) === 0
         }
         });
     } catch (error) {
@@ -409,7 +410,6 @@ class CurrencyController {
     }
     }
 }
-
 
 
 // Создаем экземпляр контроллера
