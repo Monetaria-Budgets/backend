@@ -3,28 +3,27 @@ const dotenv = require('dotenv');
 
 dotenv.config();
 
-// Используем DATABASE_URL напрямую
 const connectionString = process.env.DATABASE_URL;
 
-console.log('🟡 Подключение к БД через DATABASE_URL (без логина/пароля в логах)');
+console.log('🟡 Подключение к БД через DATABASE_URL');
 
 const pool = new Pool({
   connectionString,
   ssl: {
-    rejectUnauthorized: false // необходимо для Render
+    rejectUnauthorized: false // КРИТИЧНО ВАЖНО ДЛЯ RENDER!
   },
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 10000
 });
 
-// Тест подключения (оставим как есть)
+// Тест подключения
 async function testConnection() {
   let client;
   try {
     client = await pool.connect();
     console.log('✅ Успешное подключение к PostgreSQL');
-
+    
     const result = await client.query(`
       SELECT tablename 
       FROM pg_tables 
@@ -32,10 +31,12 @@ async function testConnection() {
       ORDER BY tablename;
     `);
     const tables = result.rows.map(row => row.tablename);
-    console.log('📊 Таблицы в базе:', tables);
+    console.log(' Таблицы в базе:', tables);
   } catch (err) {
     console.error('❌ Ошибка подключения к PostgreSQL:', err.message);
-    process.exit(1);
+    // Не убиваем процесс сразу, дадим шанс перезапуститься
+    console.error('🔴 Детали:', err);
+    // process.exit(1); // Закомментируй это временно, чтобы видеть другие ошибки
   } finally {
     if (client) client.release();
   }
