@@ -1,12 +1,55 @@
 const express = require('express');
 const dotenv = require('dotenv');
-const db = require('./db/db');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 
 dotenv.config();
 
 const app = express();
 app.use(express.json());
+
+// --- АВТОМАТИЧЕСКАЯ ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ---
+async function initDatabase() {
+  const db = require('./db/db');
+  
+  try {
+    console.log('🔧 Проверка структуры БД...');
+    
+    // Проверяем, существует ли таблица 'role' как индикатор наличия всей схемы
+    const checkTable = await db.query(`
+      SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'role')
+    `);
+    
+    if (!checkTable.rows[0].exists) {
+      console.log('️ База данных пуста. Начинаю создание таблиц из schema.sql...');
+      
+      // Читаем файл schema.sql из корня проекта (папка backend)
+      const sqlFilePath = path.join(__dirname, '..', 'schema.sql');
+      
+      if (!fs.existsSync(sqlFilePath)) {
+        console.error('❌ Файл schema.sql не найден! Создайте его в папке backend.');
+        return;
+      }
+      
+      const sqlContent = fs.readFileSync(sqlFilePath, 'utf8');
+      
+      // Выполняем весь SQL скрипт одним запросом
+      await db.pool.query(sqlContent);
+      
+      console.log('✅ Все таблицы успешно созданы!');
+    } else {
+      console.log('✅ Структура БД уже существует. Пропускаю создание.');
+    }
+  } catch (err) {
+    console.error('❌ Критическая ошибка при инициализации БД:', err.message);
+    // Не останавливаем сервер, но выводим ошибку
+  }
+}
+
+// Запускаем инициализацию ПЕРЕД настройкой роутов
+initDatabase();
+// -----------------------------------------------
 
 // Контроллеры для маршрутов
 const userRoutes = require('./routes/users.routes');
@@ -22,8 +65,6 @@ const currencyController = require('./controllers/currency.controller');
 const premiumRoutes = require('./routes/premium.routes');
 
 const currencyCron = require('./cron/currency.cron');
-
-currencyCron.init();
 
 app.use(cors({
   origin: true, 
@@ -54,14 +95,15 @@ app.use('/currency', currenciesRoutes);
 app.use('/spending-limits', spendingLimitsRoutes);
 app.use('/premium', premiumRoutes);
 
+const PORT = process.env.PORT || 10000; // Render использует порт 10000 по умолчанию
 
-const PORT = process.env.PORT || 3000;
-
-app.listen(PORT, process.env.HOST, () => {
-    console.log(`🌍 Сервер запущен на порту: ${PORT}`);
+app.listen(PORT, () => {
+    console.log(` Сервер запущен на порту: ${PORT}`);
 });
 
-// Первоначальное обновление курсов через 2 секунды после запуска
+// --- ФОНОВЫЕ ЗАДАЧИ ---
+
+// 1. Обновление курсов валют при старте (с задержкой, чтобы БД успела проинициализироваться)
 setTimeout(async () => {
   try {
     console.log('🔄 Обновляем курсы при запуске сервера...');
@@ -70,19 +112,19 @@ setTimeout(async () => {
       status: (code) => ({ json: (err) => console.error(`❌ Ошибка ${code}:`, err) })
     };
     
-    // Используем правильный метод контроллера
     const { updateRates } = currencyController;
     if (typeof updateRates === 'function') {
       await updateRates({}, mockRes);
-    } else {
-      console.error('❌ updateRates не найден в currencyController');
     }
   } catch (error) {
     console.error('❌ Ошибка при обновлении курсов при старте:', error);
   }
-}, 3000);
+}, 5000); // Задержка 5 секунд
 
-// Удаление истёкших подписок
+// 2. Инициализация крон-задачи валют
+currencyCron.init();
+
+// 3. Обновление истекших подписок
 const updateExpiredPremiums = async () => {
     const query = `
         UPDATE "user" 
@@ -97,26 +139,16 @@ const updateExpiredPremiums = async () => {
     `;
 
     try {
+        const db = require('./db/db');
         const result = await db.query(query);
         if (result.rowCount > 0) {
             console.log(`✅ ${result.rowCount} пользователей потеряли премиум.`);
-            console.log('📋 ID пользователей:', result.rows.map(row => row.id));
-        } else {
-            console.log('📭 Нет истекших премиум-подписок');
         }
     } catch (err) {
         console.error('❌ Ошибка при обновлении истёкших подписок:', err.message);
-        console.error('🔴 Детали ошибки:', err);
     }
 };
 
-
-
-// Запускаем по интервалу
-const UPDATE_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 часа
-setInterval(updateExpiredPremiums, UPDATE_INTERVAL_MS);
-
-// Запускаем сразу при старте
+// Запускаем сразу и затем каждые 24 часа
 updateExpiredPremiums();
-
-
+setInterval(updateExpiredPremiums, 24 * 60 * 60 * 1000);

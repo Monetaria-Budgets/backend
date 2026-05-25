@@ -1,41 +1,58 @@
-const { Client } = require('pg'); // Используем Client вместо Pool для простоты теста
+const { Pool } = require('pg');
 const dotenv = require('dotenv');
 
 dotenv.config();
 
-const client = new Client({
+console.log('🟡 Инициализация подключения к PostgreSQL...');
+
+// Настройка пула соединений
+const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false
-  }
+    rejectUnauthorized: false // Критично важно для Render!
+  },
+  max: 20, // Максимум соединений
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
 });
 
-async function connectDB() {
+// Проверка подключения при запуске
+pool.on('connect', () => {
+  console.log('✅ Новое соединение с БД установлено');
+});
+
+pool.on('error', (err) => {
+  console.error('❌ Ошибка в пуле соединений:', err);
+});
+
+async function testConnection() {
+  let client;
   try {
-    await client.connect();
-    console.log('✅ Успешное подключение к PostgreSQL через Client');
+    client = await pool.connect();
+    console.log('✅ Успешное подключение к PostgreSQL');
     
-    // Проверка таблиц
-    const res = await client.query(`
-      SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
+    const result = await client.query(`
+      SELECT tablename 
+      FROM pg_tables 
+      WHERE schemaname = 'public'
+      ORDER BY tablename;
     `);
-    console.log('📊 Таблицы:', res.rows.map(r => r.tablename));
-    
-    return true;
+    const tables = result.rows.map(row => row.tablename);
+    console.log('📊 Таблицы в базе:', tables.length > 0 ? tables.join(', ') : '(пусто)');
   } catch (err) {
-    console.error('❌ Ошибка подключения:', err.message);
-    return false;
+    console.error('❌ Ошибка проверки подключения:', err.message);
+  } finally {
+    if (client) client.release();
   }
 }
 
-// Запускаем подключение
-connectDB();
+// Запускаем тест сразу
+testConnection();
 
 module.exports = {
-  query: (text, params) => client.query(text, params),
-  client
+  query: (text, params) => pool.query(text, params),
+  pool
 };
-
 
 
 
