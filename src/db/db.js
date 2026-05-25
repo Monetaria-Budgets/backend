@@ -1,52 +1,39 @@
-const { Pool } = require('pg');
+const { Client } = require('pg'); // Используем Client вместо Pool для простоты теста
 const dotenv = require('dotenv');
 
 dotenv.config();
 
-const connectionString = process.env.DATABASE_URL;
-
-console.log('🟡 Подключение к БД через DATABASE_URL');
-
-const pool = new Pool({
-  connectionString,
+const client = new Client({
+  connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // КРИТИЧНО ВАЖНО ДЛЯ RENDER!
-  },
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000
+    rejectUnauthorized: false
+  }
 });
 
-// Тест подключения
-async function testConnection() {
-  let client;
+async function connectDB() {
   try {
-    client = await pool.connect();
-    console.log('✅ Успешное подключение к PostgreSQL');
+    await client.connect();
+    console.log('✅ Успешное подключение к PostgreSQL через Client');
     
-    const result = await client.query(`
-      SELECT tablename 
-      FROM pg_tables 
-      WHERE schemaname = 'public'
-      ORDER BY tablename;
+    // Проверка таблиц
+    const res = await client.query(`
+      SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename;
     `);
-    const tables = result.rows.map(row => row.tablename);
-    console.log(' Таблицы в базе:', tables);
+    console.log('📊 Таблицы:', res.rows.map(r => r.tablename));
+    
+    return true;
   } catch (err) {
-    console.error('❌ Ошибка подключения к PostgreSQL:', err.message);
-    // Не убиваем процесс сразу, дадим шанс перезапуститься
-    console.error('🔴 Детали:', err);
-    // process.exit(1); // Закомментируй это временно, чтобы видеть другие ошибки
-  } finally {
-    if (client) client.release();
+    console.error('❌ Ошибка подключения:', err.message);
+    return false;
   }
 }
 
-testConnection();
+// Запускаем подключение
+connectDB();
 
 module.exports = {
-  query: (text, params) => pool.query(text, params),
-  pool
+  query: (text, params) => client.query(text, params),
+  client
 };
 
 
