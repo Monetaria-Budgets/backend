@@ -16,42 +16,47 @@ async function initDatabase() {
   try {
     console.log('🔧 Проверка структуры БД...');
     
-    // ВРЕМЕННАЯ ПРОВЕРКА: сколько валют в БД
+    // Проверка количества записей в таблицах
     const currencyCount = await db.query('SELECT COUNT(*) FROM currency');
     console.log(`💰 В таблице currency записей: ${currencyCount.rows[0].count}`);
     
-    // Проверяем, существует ли таблица 'role' как индикатор наличия всей схемы
-    const checkTable = await db.query(`
-      SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'role')
-    `);
+    const roleCount = await db.query('SELECT COUNT(*) FROM role');
+    const userCount = await db.query('SELECT COUNT(*) FROM "user"');
+    const operationTypeCount = await db.query('SELECT COUNT(*) FROM operationtype');
     
-    if (!checkTable.rows[0].exists) {
-      console.log('🟡 База данных пуста. Начинаю создание таблиц из schema.sql...');
+    console.log(`👥 В таблице role записей: ${roleCount.rows[0].count}`);
+    console.log(`👤 В таблице user записей: ${userCount.rows[0].count}`);
+    console.log(`📊 В таблице operationtype записей: ${operationTypeCount.rows[0].count}`);
+    
+    // Проверяем, есть ли данные в критических таблицах
+    const hasData = parseInt(roleCount.rows[0].count) > 0 || 
+                    parseInt(operationTypeCount.rows[0].count) > 0;
+    
+    if (!hasData) {
+      console.log('🟡 В таблицах нет данных. Выполняю schema.sql...');
       
-      // Читаем файл schema.sql из корня проекта (папка backend)
       const sqlFilePath = path.join(__dirname, '..', 'schema.sql');
       
       if (!fs.existsSync(sqlFilePath)) {
-        console.error('❌ Файл schema.sql не найден! Создайте его в папке backend.');
+        console.error('❌ Файл schema.sql не найден! Путь:', sqlFilePath);
         return;
       }
       
       const sqlContent = fs.readFileSync(sqlFilePath, 'utf8');
-      
-      // Выполняем весь SQL скрипт одним запросом
       await db.pool.query(sqlContent);
       
-      console.log('✅ Все таблицы успешно созданы!');
+      console.log('✅ Данные из schema.sql загружены!');
       
-      // Повторная проверка после создания
+      // Повторная проверка после загрузки
       const newCurrencyCount = await db.query('SELECT COUNT(*) FROM currency');
-      console.log(`💰 После создания в таблице currency записей: ${newCurrencyCount.rows[0].count}`);
+      const newRoleCount = await db.query('SELECT COUNT(*) FROM role');
+      console.log(`💰 После загрузки в currency записей: ${newCurrencyCount.rows[0].count}`);
+      console.log(`👥 После загрузки в role записей: ${newRoleCount.rows[0].count}`);
     } else {
-      console.log('✅ Структура БД уже существует. Пропускаю создание.');
+      console.log('✅ Данные в таблицах уже есть. Пропускаю загрузку schema.sql.');
     }
   } catch (err) {
     console.error('❌ Критическая ошибка при инициализации БД:', err.message);
-    // Не останавливаем сервер, но выводим ошибку
   }
 }
 
@@ -103,7 +108,7 @@ app.use('/currency', currenciesRoutes);
 app.use('/spending-limits', spendingLimitsRoutes);
 app.use('/premium', premiumRoutes);
 
-const PORT = process.env.PORT || 10000; // Render использует порт 10000 по умолчанию
+const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
     console.log(` Сервер запущен на порту: ${PORT}`);
@@ -111,7 +116,6 @@ app.listen(PORT, () => {
 
 // --- ФОНОВЫЕ ЗАДАЧИ ---
 
-// 1. Обновление курсов валют при старте (с задержкой, чтобы БД успела проинициализироваться)
 setTimeout(async () => {
   try {
     console.log('🔄 Обновляем курсы при запуске сервера...');
@@ -127,12 +131,10 @@ setTimeout(async () => {
   } catch (error) {
     console.error('❌ Ошибка при обновлении курсов при старте:', error);
   }
-}, 5000); // Задержка 5 секунд
+}, 5000);
 
-// 2. Инициализация крон-задачи валют
 currencyCron.init();
 
-// 3. Обновление истекших подписок
 const updateExpiredPremiums = async () => {
     const query = `
         UPDATE "user" 
@@ -157,6 +159,5 @@ const updateExpiredPremiums = async () => {
     }
 };
 
-// Запускаем сразу и затем каждые 24 часа
 updateExpiredPremiums();
 setInterval(updateExpiredPremiums, 24 * 60 * 60 * 1000);
