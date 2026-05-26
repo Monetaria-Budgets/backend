@@ -16,13 +16,17 @@ async function initDatabase() {
   try {
     console.log('🔧 Проверка структуры БД...');
     
+    // ВРЕМЕННАЯ ПРОВЕРКА: сколько валют в БД
+    const currencyCount = await db.query('SELECT COUNT(*) FROM currency');
+    console.log(`💰 В таблице currency записей: ${currencyCount.rows[0].count}`);
+    
     // Проверяем, существует ли таблица 'role' как индикатор наличия всей схемы
     const checkTable = await db.query(`
       SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'role')
     `);
     
     if (!checkTable.rows[0].exists) {
-      console.log('️ База данных пуста. Начинаю создание таблиц из schema.sql...');
+      console.log('🟡 База данных пуста. Начинаю создание таблиц из schema.sql...');
       
       // Читаем файл schema.sql из корня проекта (папка backend)
       const sqlFilePath = path.join(__dirname, '..', 'schema.sql');
@@ -38,6 +42,10 @@ async function initDatabase() {
       await db.pool.query(sqlContent);
       
       console.log('✅ Все таблицы успешно созданы!');
+      
+      // Повторная проверка после создания
+      const newCurrencyCount = await db.query('SELECT COUNT(*) FROM currency');
+      console.log(`💰 После создания в таблице currency записей: ${newCurrencyCount.rows[0].count}`);
     } else {
       console.log('✅ Структура БД уже существует. Пропускаю создание.');
     }
