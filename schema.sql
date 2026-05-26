@@ -420,7 +420,60 @@ INSERT INTO exchange_rate (id, currency_id, rate, previous_rate, change_amount, 
 (842, 19, 82.5445, 83.2746, -0.7301, -0.877, '2026-05-23', '2026-05-24 22:15:48.304738')
 ON CONFLICT (id) DO NOTHING;
 
+
+-- ==========================================
+-- 5. Сброс sequence для всех таблиц (исправление автоинкремента)
+-- ==========================================
+
+DO $$
+BEGIN
+    -- blacklisted_tokens
+    PERFORM setval('blacklisted_tokens_id_seq', COALESCE((SELECT MAX(id) FROM blacklisted_tokens), 1));
+    
+    -- category
+    PERFORM setval('category_id_seq', COALESCE((SELECT MAX(id) FROM category), 1));
+    
+    -- colorscheme
+    PERFORM setval('colorscheme_id_seq', COALESCE((SELECT MAX(id) FROM colorscheme), 1));
+    
+    -- currency
+    PERFORM setval('currency_id_seq', COALESCE((SELECT MAX(id) FROM currency), 1));
+    
+    -- exchange_rate
+    PERFORM setval('exchange_rate_id_seq', COALESCE((SELECT MAX(id) FROM exchange_rate), 1));
+    
+    -- notification
+    PERFORM setval('notification_id_seq', COALESCE((SELECT MAX(id) FROM notification), 1));
+    
+    -- notificationtype
+    PERFORM setval('notificationtype_id_seq', COALESCE((SELECT MAX(id) FROM notificationtype), 1));
+    
+    -- operation
+    PERFORM setval('operation_id_seq', COALESCE((SELECT MAX(id) FROM operation), 1));
+    
+    -- operationtype
+    PERFORM setval('operationtype_id_seq', COALESCE((SELECT MAX(id) FROM operationtype), 1));
+    
+    -- premiumuser
+    PERFORM setval('premiumuser_id_seq', COALESCE((SELECT MAX(id) FROM premiumuser), 1));
+    
+    -- role
+    PERFORM setval('role_id_seq', COALESCE((SELECT MAX(id) FROM role), 1));
+    
+    -- spendinglimit
+    PERFORM setval('spendinglimit_id_seq', COALESCE((SELECT MAX(id) FROM spendinglimit), 1));
+    
+    -- user
+    PERFORM setval('user_id_seq', COALESCE((SELECT MAX(id) FROM "user"), 1));
+    
+    RAISE NOTICE '✅ Все sequence обновлены';
+END $$;
+
 -- NOTE: The full exchange_rate table has ~879 records. 
 -- To keep this response manageable, I've inserted key records. 
 -- If you need the FULL exchange_rate data, you should run the specific INSERTs for the missing IDs 
 -- using the same pattern: INSERT INTO exchange_rate (...) VALUES (...) ON CONFLICT (id) DO NOTHING;
+
+
+
+
